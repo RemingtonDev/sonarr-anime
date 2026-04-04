@@ -173,7 +173,6 @@ jobs:
           push: true
           tags: |
             ${{ steps.image.outputs.name }}:${{ needs.resolve_version.outputs.release_version }}
-            ${{ steps.image.outputs.name }}:latest
           labels: |
             org.opencontainers.image.title=sonarr-anime
             org.opencontainers.image.description=Anime-focused Sonarr builds
@@ -212,3 +211,69 @@ jobs:
             --title "$RELEASE_VERSION" \
             --notes "Automated release for $RELEASE_VERSION (app version $APP_VERSION)." \
             --target "${GITHUB_SHA}"
+
+  publish_latest:
+    needs: [resolve_version, docker, release]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Compute Image Name
+        id: image
+        shell: bash
+        run: |
+          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish Latest Tag
+        shell: bash
+        run: |
+          docker buildx imagetools create \
+            --tag "${{ steps.image.outputs.name }}:latest" \
+            "${{ steps.image.outputs.name }}:${{ needs.resolve_version.outputs.release_version }}"
+
+  verify_release:
+    needs: [resolve_version, docker, release, publish_latest]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Compute Image Name
+        id: image
+        shell: bash
+        run: |
+          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify Release and Images
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+          RELEASE_VERSION: ${{ needs.resolve_version.outputs.release_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh release view "v$RELEASE_VERSION" --repo "${GITHUB_REPOSITORY}" >/dev/null
+          version_digest="$(docker buildx imagetools inspect "$IMAGE_NAME:$RELEASE_VERSION" | sed -n 's/^Digest:[[:space:]]*//p' | head -n 1)"
+          latest_digest="$(docker buildx imagetools inspect "$IMAGE_NAME:latest" | sed -n 's/^Digest:[[:space:]]*//p' | head -n 1)"
+
+          test -n "$version_digest"
+          test -n "$latest_digest"
+          test "$version_digest" = "$latest_digest"

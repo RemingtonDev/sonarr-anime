@@ -38,6 +38,15 @@ function About() {
   return (
     <FieldSet legend={translate('About')}>
       <DescriptionList className={styles.descriptionList}>
+        <DescriptionListItem
+          title="Fork"
+          data={
+            <InlineMarkdown
+              data={`sonarr-anime running, build \`${version}\` · [RemingtonDev/sonarr-anime](https://github.com/RemingtonDev/sonarr-anime)`}
+            />
+          }
+        />
+
         <DescriptionListItem title={translate('Version')} data={version} />
 
         {packageVersion && (

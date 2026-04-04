@@ -142,13 +142,14 @@ Successful `main` builds publish:
 
 - a GitHub Release tagged `v<version>`
 - packaged release archives
-- GHCR images tagged `<version>` and `latest`
+- a GHCR image tagged `<version>`
+- `latest` after the matching GitHub Release has been created successfully
 
 ## Image tags
 
 | Tag | Source | Description |
 |-----|--------|-------------|
-| `latest` | `main` | Current stable build from the main branch |
+| `latest` | `main` | Alias for the most recent successful GitHub Release |
 | `4.0.17.812` | `main` | Pinned image tag for a specific published release |
 
 Stable releases come from `main`.
