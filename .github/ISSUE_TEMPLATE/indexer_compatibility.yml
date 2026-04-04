@@ -1,0 +1,86 @@
+name: Indexer Compatibility Report
+description: Report how an indexer behaves with the anime search cascade
+labels: ['indexer-compat']
+body:
+- type: markdown
+  attributes:
+    value: |
+      This form collects compatibility data for indexers beyond the tested baseline (native Nyaa).
+      Both success and failure reports are useful.
+- type: input
+  attributes:
+    label: Indexer name and type
+    description: "e.g. Nyaa (Torznab), AnimeTosho (Newznab), AniDex (Torznab)"
+    placeholder: "Indexer Name (protocol)"
+  validations:
+    required: true
+- type: dropdown
+  attributes:
+    label: Connection path
+    options:
+      - Native / built-in indexer
+      - Prowlarr / Torznab
+      - Prowlarr / Newznab
+      - Other
+  validations:
+    required: true
+- type: dropdown
+  attributes:
+    label: Public or private?
+    options:
+      - Public
+      - Private
+  validations:
+    required: true
+- type: input
+  attributes:
+    label: Fork version
+    placeholder: "4.0.17.812"
+  validations:
+    required: true
+- type: textarea
+  attributes:
+    label: Sample release titles
+    description: Paste a few release titles that worked or failed to match. This helps diagnose parser issues.
+    placeholder: |
+      Worked: [SubGroup] Series Name S01-S04 [1080p]
+      Failed: [SubGroup] Series.Name.Complete.BluRay.1080p
+  validations:
+    required: true
+- type: dropdown
+  attributes:
+    label: Did broad-first (pack) search happen?
+    description: In trace logs, was a broad title-only query sent before season-specific queries?
+    options:
+      - "Yes"
+      - "No"
+      - "Not sure"
+  validations:
+    required: true
+- type: dropdown
+  attributes:
+    label: Was pack coverage recognized?
+    description: Did the cascade skip per-episode queries after finding a pack release?
+    options:
+      - "Yes"
+      - "No"
+      - "Partially (some seasons skipped)"
+      - "Not sure"
+  validations:
+    required: true
+- type: dropdown
+  attributes:
+    label: Does behavior differ from native Nyaa baseline?
+    options:
+      - "Yes — worse (more queries, missed packs)"
+      - "Yes — different but acceptable"
+      - "No — same behavior"
+      - "Not sure / haven't compared"
+  validations:
+    required: true
+- type: textarea
+  attributes:
+    label: Additional context
+    description: Trace log excerpts, e2e test output, or any other details.
+  validations:
+    required: false

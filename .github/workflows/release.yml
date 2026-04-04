@@ -1,0 +1,167 @@
+name: Release
+
+on:
+  workflow_call:
+    inputs:
+      framework:
+        description: ".net framework"
+        required: true
+        type: string
+      branch:
+        description: "Git branch used for this build"
+        required: true
+        type: string
+      major_version:
+        description: "Sonarr major version"
+        required: true
+        type: string
+      version:
+        description: "Sonarr version"
+        required: true
+        type: string
+    secrets:
+      GHCR_TOKEN:
+        required: false
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  package:
+    strategy:
+      matrix:
+        platform: [freebsd, linux, macos, windows]
+        include:
+          - platform: freebsd
+            os: ubuntu-latest
+          - platform: linux
+            os: ubuntu-latest
+          - platform: macos
+            os: ubuntu-latest
+          - platform: windows
+            os: windows-latest
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Package
+        uses: ./.github/actions/package
+        with:
+          framework: ${{ inputs.framework }}
+          platform: ${{ matrix.platform }}
+          artifact: build_${{ matrix.platform }}
+          branch: ${{ inputs.branch }}
+          major_version: ${{ inputs.major_version }}
+          version: ${{ inputs.version }}
+
+  docker:
+    needs: package
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Download Linux Artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: build_linux
+          path: _output
+
+      - name: Download UI Artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: build_ui
+          path: _output/UI
+
+      - name: Stage Docker Context
+        shell: bash
+        run: |
+          for mapping in "amd64:linux-x64" "arm64:linux-arm64"; do
+            IFS=":" read -r arch runtime <<< "$mapping"
+            target_dir="Sonarr-$arch"
+            runtime_dir="_output/$runtime/${{ inputs.framework }}/Sonarr"
+
+            rm -rf "$target_dir"
+            mkdir -p "$target_dir"
+            cp -R "$runtime_dir"/. "$target_dir"/
+            cp -R _output/UI "$target_dir"/UI
+          done
+
+          find Sonarr-amd64 Sonarr-arm64 \( -name "ffprobe" -o -name "Sonarr" -o -name "Sonarr.Update" \) -exec chmod a+x {} \;
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Compute Image Name
+        id: image
+        shell: bash
+        run: |
+          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.release
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ inputs.version }}
+            ${{ steps.image.outputs.name }}:latest
+          labels: |
+            org.opencontainers.image.title=sonarr-anime
+            org.opencontainers.image.description=Anime-focused Sonarr builds
+            org.opencontainers.image.url=https://github.com/${{ github.repository }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ inputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+  release:
+    needs: [package, docker]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download Release Artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: _artifacts
+          pattern: release_*
+          merge-multiple: true
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: v${{ inputs.version }}
+        shell: bash
+        run: |
+          if gh release view "$RELEASE_TAG" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists, skipping."
+            exit 0
+          fi
+
+          gh release create "$RELEASE_TAG" _artifacts/Sonarr.* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "${{ inputs.version }}" \
+            --notes "Automated release for version ${{ inputs.version }}." \
+            --target "${GITHUB_SHA}"

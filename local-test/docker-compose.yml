@@ -1,0 +1,21 @@
+services:
+  sonarr:
+    image: sonarr-anime:local
+    container_name: sonarr-anime-local
+    platform: linux/amd64
+    ports:
+      - "8989:8989"
+    volumes:
+      - ./config:/config
+      - ./tv:/tv
+    restart: unless-stopped
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr@sha256:9ef5d8bf832edcacb6082f9262cb36087854e78eb7b1c3e1d4375056055b2d82  # 2.3.0.5236-ls139
+    container_name: prowlarr-local
+    platform: linux/amd64
+    ports:
+      - "9696:9696"
+    volumes:
+      - ./prowlarr-config:/config
+    restart: unless-stopped

@@ -1,0 +1,43 @@
+# Local testing
+local-test/
+scripts/
+
+# Build artifacts (keep Sonarr/ — needed by local Dockerfile)
+_output*/
+_artifacts/
+_tests*/
+_publish*/
+_temp*/
+_rawPackage/
+docker-context/
+TestResults/
+
+# Git and IDE
+.git/
+.github/
+.vs/
+.idea/
+.claude/
+
+# Logs and databases
+*.log
+*.trace*.txt
+*.debug*.txt
+*.db
+*.db-shm
+*.db-wal
+
+# Source (not needed in runtime image)
+src/
+frontend/
+node_modules/
+
+# Packages
+Sonarr_*/
+*.zip
+*.gz
+
+# Docs
+*.md
+docs/
+LICENSE

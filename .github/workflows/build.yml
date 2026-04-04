@@ -1,0 +1,256 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+    paths-ignore:
+      - "src/Sonarr.Api.*/openapi.json"
+  pull_request:
+    branches:
+      - develop
+      - main
+    paths-ignore:
+      - "src/NzbDrone.Core/Localization/Core/**"
+      - "src/Sonarr.Api.*/openapi.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  FRAMEWORK: net6.0
+  RAW_BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+  SONARR_MAJOR_VERSION: 4
+  VERSION: 4.0.17
+
+jobs:
+  backend:
+    runs-on: windows-latest
+    outputs:
+      framework: ${{ steps.variables.outputs.framework }}
+      major_version: ${{ steps.variables.outputs.major_version }}
+      version: ${{ steps.variables.outputs.version }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: 6.0.100
+
+      - name: Setup Environment Variables
+        id: variables
+        shell: bash
+        run: |
+          # Add 800 to the build number because GitHub won't let us pick an arbitrary starting point
+          SONARR_VERSION="${{ env.VERSION }}.$((${{ github.run_number }}+800))"
+          DOTNET_VERSION=$(jq -r '.sdk.version' global.json)
+
+          echo "SDK_PATH=${{ env.DOTNET_ROOT }}/sdk/${DOTNET_VERSION}" >> "$GITHUB_ENV"
+          echo "SONARR_VERSION=$SONARR_VERSION" >> "$GITHUB_ENV"
+          echo "BRANCH=${RAW_BRANCH_NAME//\//-}" >> "$GITHUB_ENV"
+
+          echo "framework=${{ env.FRAMEWORK }}" >> "$GITHUB_OUTPUT"
+          echo "major_version=${{ env.SONARR_MAJOR_VERSION }}" >> "$GITHUB_OUTPUT"
+          echo "version=$SONARR_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Enable Extra Platforms In SDK
+        shell: bash
+        run: ./build.sh --enable-extra-platforms-in-sdk
+
+      - name: Build Backend
+        shell: bash
+        run: ./build.sh --backend --enable-extra-platforms --packages
+
+      - name: Publish win-x64 Test Artifact
+        uses: ./.github/actions/publish-test-artifact
+        with:
+          framework: ${{ env.FRAMEWORK }}
+          runtime: win-x64
+
+      - name: Publish linux-x64 Test Artifact
+        uses: ./.github/actions/publish-test-artifact
+        with:
+          framework: ${{ env.FRAMEWORK }}
+          runtime: linux-x64
+
+      - name: Publish osx-arm64 Test Artifact
+        uses: ./.github/actions/publish-test-artifact
+        with:
+          framework: ${{ env.FRAMEWORK }}
+          runtime: osx-arm64
+
+      - name: Publish FreeBSD Artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: build_freebsd
+          path: _artifacts/freebsd-*/**/*
+          retention-days: 7
+
+      - name: Publish Linux Artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: build_linux
+          path: _artifacts/linux-*/**/*
+          retention-days: 7
+
+      - name: Publish macOS Artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: build_macos
+          path: _artifacts/osx-*/**/*
+          retention-days: 7
+
+      - name: Publish Windows Artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: build_windows
+          path: _artifacts/win-*/**/*
+          retention-days: 7
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Volta
+        uses: volta-cli/action@5c175f92dea6f48441c436471e6479dbc192e194 # v4
+
+      - name: Yarn Install
+        run: yarn install
+
+      - name: Lint
+        run: yarn lint
+
+      - name: Stylelint
+        run: yarn stylelint -f github
+
+      - name: Build
+        run: yarn build --env production
+
+      - name: Publish UI Artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: build_ui
+          path: _output/UI/**/*
+          retention-days: 7
+
+  unit_test:
+    needs: backend
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            artifact: tests-linux-x64
+            filter: TestCategory!=ManualTest&TestCategory!=WINDOWS&TestCategory!=IntegrationTest&TestCategory!=AutomationTest
+          - os: macos-latest
+            artifact: tests-osx-arm64
+            filter: TestCategory!=ManualTest&TestCategory!=WINDOWS&TestCategory!=IntegrationTest&TestCategory!=AutomationTest
+          - os: windows-latest
+            artifact: tests-win-x64
+            filter: TestCategory!=ManualTest&TestCategory!=LINUX&TestCategory!=IntegrationTest&TestCategory!=AutomationTest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Test
+        uses: ./.github/actions/test
+        with:
+          os: ${{ matrix.os }}
+          artifact: ${{ matrix.artifact }}
+          pattern: Sonarr.*.Test.dll
+          filter: ${{ matrix.filter }}
+
+  unit_test_postgres:
+    needs: backend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Test
+        uses: ./.github/actions/test
+        with:
+          os: ubuntu-latest
+          artifact: tests-linux-x64
+          pattern: Sonarr.*.Test.dll
+          filter: TestCategory!=ManualTest&TestCategory!=WINDOWS&TestCategory!=IntegrationTest&TestCategory!=AutomationTest
+          use_postgres: true
+
+  integration_test:
+    needs: backend
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            artifact: tests-linux-x64
+            filter: TestCategory!=ManualTest&TestCategory!=WINDOWS&TestCategory=IntegrationTest
+            binary_artifact: build_linux
+            binary_path: linux-x64/${{ needs.backend.outputs.framework }}/Sonarr
+          - os: macos-latest
+            artifact: tests-osx-arm64
+            filter: TestCategory!=ManualTest&TestCategory!=WINDOWS&TestCategory=IntegrationTest
+            binary_artifact: build_macos
+            binary_path: osx-arm64/${{ needs.backend.outputs.framework }}/Sonarr
+          - os: windows-latest
+            artifact: tests-win-x64
+            filter: TestCategory!=ManualTest&TestCategory!=LINUX&TestCategory=IntegrationTest
+            binary_artifact: build_windows
+            binary_path: win-x64/${{ needs.backend.outputs.framework }}/Sonarr
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Test
+        uses: ./.github/actions/test
+        with:
+          os: ${{ matrix.os }}
+          artifact: ${{ matrix.artifact }}
+          pattern: Sonarr.*.Test.dll
+          filter: ${{ matrix.filter }}
+          integration_tests: true
+          binary_artifact: ${{ matrix.binary_artifact }}
+          binary_path: ${{ matrix.binary_path }}
+
+  deploy:
+    if: ${{ github.ref_name == 'main' }}
+    needs: [backend, frontend, unit_test, unit_test_postgres, integration_test]
+    permissions:
+      contents: write
+      packages: write
+    secrets: inherit
+    uses: ./.github/workflows/release.yml
+    with:
+      framework: ${{ needs.backend.outputs.framework }}
+      branch: ${{ github.ref_name }}
+      major_version: ${{ needs.backend.outputs.major_version }}
+      version: ${{ needs.backend.outputs.version }}

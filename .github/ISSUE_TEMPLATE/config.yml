@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: General Sonarr support
+    url: https://wiki.servarr.com/sonarr
+    about: For help with Sonarr features unrelated to this fork's anime search changes, use the upstream Sonarr wiki, forums, or Discord.
+  - name: Upstream Sonarr issues
+    url: https://github.com/Sonarr/Sonarr/issues
+    about: For bugs in Sonarr behavior that are not specific to this fork's anime search patches.

@@ -1,0 +1,103 @@
+name: Bug Report
+description: Report an anime search bug in sonarr-anime
+labels: ['bug']
+body:
+- type: checkboxes
+  attributes:
+    label: Pre-flight checks
+    options:
+    - label: I have searched existing open and closed issues
+      required: true
+    - label: This bug is specific to sonarr-anime (not upstream Sonarr behavior)
+      required: true
+- type: input
+  attributes:
+    label: Fork version
+    description: "sonarr-anime version (e.g. 4.0.17.812) — check System > Status in the UI"
+    placeholder: "4.0.17.812"
+  validations:
+    required: true
+- type: dropdown
+  attributes:
+    label: Install type
+    options:
+      - GHCR Docker image
+      - Release archive
+      - Local build
+  validations:
+    required: true
+- type: dropdown
+  attributes:
+    label: Indexer path
+    description: How does Sonarr reach the indexer?
+    options:
+      - Native Nyaa (built-in indexer)
+      - Prowlarr / Torznab
+      - Prowlarr / Newznab
+      - Other
+  validations:
+    required: true
+- type: dropdown
+  attributes:
+    label: Public or private indexer?
+    options:
+      - Public (e.g. Nyaa, AnimeTosho)
+      - Private
+  validations:
+    required: true
+- type: input
+  attributes:
+    label: Series and seasons searched
+    description: "e.g. Sword Art Online S01-S04"
+    placeholder: "Series Name S01"
+  validations:
+    required: true
+- type: textarea
+  attributes:
+    label: Expected cascade behavior
+    description: What did you expect the search cascade to do? (e.g. pack search should have covered all episodes)
+  validations:
+    required: true
+- type: textarea
+  attributes:
+    label: Actual behavior
+    description: What actually happened?
+  validations:
+    required: true
+- type: dropdown
+  attributes:
+    label: Did per-episode fallback occur?
+    description: Check trace logs for individual episode queries after the pack/season search
+    options:
+      - "Yes"
+      - "No"
+      - "Not sure"
+  validations:
+    required: true
+- type: textarea
+  attributes:
+    label: Trace logs
+    description: |
+      Attach trace logs (Settings > General > Log Level: Trace). Look for files like `sonarr.trace.*.txt` in your config/logs directory.
+      **Info logs are not trace logs.** Without trace logs, most search bugs cannot be diagnosed.
+    placeholder: "Paste trace log excerpts or attach the file"
+  validations:
+    required: true
+- type: textarea
+  attributes:
+    label: E2E test output (if reproducible)
+    description: |
+      If you can reproduce locally, run `/test-e2e` or `/test-e2e-prowlarr` and paste the report summary.
+  validations:
+    required: false
+- type: textarea
+  attributes:
+    label: Environment
+    description: OS, Docker version, reverse proxy, etc.
+    value: |
+        - OS:
+        - Docker:
+        - Reverse proxy:
+    render: markdown
+  validations:
+    required: false
