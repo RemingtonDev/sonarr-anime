@@ -9,59 +9,40 @@ interface InlineMarkdownProps {
 
 function InlineMarkdown(props: InlineMarkdownProps) {
   const { className, data, blockClassName } = props;
-
-  // For now only replace links or code blocks (not both)
   const markdownBlocks: (ReactElement | string)[] = [];
 
   if (data) {
-    const linkRegex = RegExp(/\[(.+?)\]\((.+?)\)/g);
+    const markdownRegex = /\[([^\]]+?)\]\(([^)]+?)\)|`([^`]+?)`/g;
 
     let endIndex = 0;
-    let match = null;
+    let match: RegExpExecArray | null = null;
 
-    while ((match = linkRegex.exec(data)) !== null) {
+    while ((match = markdownRegex.exec(data)) !== null) {
       if (match.index > endIndex) {
-        markdownBlocks.push(data.substr(endIndex, match.index - endIndex));
+        markdownBlocks.push(data.slice(endIndex, match.index));
       }
 
-      markdownBlocks.push(
-        <Link key={match.index} to={match[2]}>
-          {match[1]}
-        </Link>
-      );
+      if (match[1] && match[2]) {
+        markdownBlocks.push(
+          <Link key={`link-${match.index}`} to={match[2]}>
+            {match[1]}
+          </Link>
+        );
+      } else if (match[3]) {
+        markdownBlocks.push(
+          <code
+            key={`code-${match.index}`}
+            className={blockClassName ?? undefined}
+          >
+            {match[3]}
+          </code>
+        );
+      }
       endIndex = match.index + match[0].length;
     }
 
-    if (endIndex !== data.length && markdownBlocks.length > 0) {
-      markdownBlocks.push(data.substr(endIndex, data.length - endIndex));
-    }
-
-    const codeRegex = RegExp(/(?=`)`(?!`)[^`]*(?=`)`(?!`)/g);
-
-    endIndex = 0;
-    match = null;
-    let matchedCode = false;
-
-    while ((match = codeRegex.exec(data)) !== null) {
-      matchedCode = true;
-
-      if (match.index > endIndex) {
-        markdownBlocks.push(data.substr(endIndex, match.index - endIndex));
-      }
-
-      markdownBlocks.push(
-        <code
-          key={`code-${match.index}`}
-          className={blockClassName ?? undefined}
-        >
-          {match[0].substring(1, match[0].length - 1)}
-        </code>
-      );
-      endIndex = match.index + match[0].length;
-    }
-
-    if (endIndex !== data.length && markdownBlocks.length > 0 && matchedCode) {
-      markdownBlocks.push(data.substr(endIndex, data.length - endIndex));
+    if (markdownBlocks.length > 0 && endIndex < data.length) {
+      markdownBlocks.push(data.slice(endIndex));
     }
 
     if (markdownBlocks.length === 0) {
