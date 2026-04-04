@@ -403,6 +403,57 @@ namespace NzbDrone.Core.Test.DecisionEngineTests
         }
 
         [Test]
+        public void should_treat_single_season_alias_only_bare_title_as_season_pack_during_anime_season_search()
+        {
+            var series = Builder<Series>.CreateNew()
+                .With(s => s.Title = "Example Anime Title")
+                .With(s => s.TvdbId = 123456)
+                .Build();
+
+            var episodes = new List<Episode> { Builder<Episode>.CreateNew().With(e => e.SeasonNumber = 1).Build() };
+
+            var criteria = new AnimeSeasonSearchCriteria
+            {
+                Series = series,
+                SeasonNumber = 1,
+                SceneTitles = new List<string> { "Example Anime", "Example Anime Title" },
+                Episodes = episodes
+            };
+
+            _reports = new List<ReleaseInfo> { new ReleaseInfo { Title = "[Group] Example Anime [1080p]" } };
+
+            var remoteEpisode = new RemoteEpisode
+            {
+                Series = series,
+                Episodes = episodes
+            };
+
+            Mocker.GetMock<IParsingService>()
+                .Setup(c => c.Map(It.IsAny<ParsedEpisodeInfo>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SearchCriteriaBase>()))
+                .Returns(remoteEpisode);
+
+            _pass1.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
+            _pass2.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
+            _pass3.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
+            GivenSpecifications(_pass1, _pass2, _pass3);
+
+            var result = Subject.GetSearchDecision(_reports, criteria).ToList();
+
+            result.Should().HaveCount(1);
+            result.First().Approved.Should().BeTrue();
+
+            Mocker.GetMock<IParsingService>()
+                .Verify(
+                    c => c.Map(
+                        It.Is<ParsedEpisodeInfo>(p => p.FullSeason && p.SeasonNumber == 1 && p.SeriesTitle == "Example Anime Title"),
+                        It.IsAny<int>(),
+                        It.IsAny<int>(),
+                        It.IsAny<string>(),
+                        It.IsAny<SearchCriteriaBase>()),
+                    Times.Once());
+        }
+
+        [Test]
         public void should_treat_bare_title_with_parenthesized_year_as_season_pack_during_anime_season_search()
         {
             var series = Builder<Series>.CreateNew()

@@ -17,8 +17,11 @@ inputs:
   major_version:
     description: 'Sonarr major version'
     required: true
-  version:
-    description: 'Sonarr version'
+  app_version:
+    description: 'Sonarr app version'
+    required: true
+  release_version:
+    description: 'Sonarr fork release version'
     required: true
 
 runs:
@@ -42,7 +45,8 @@ runs:
         echo "FRAMEWORK=${{ inputs.framework }}" >> "$GITHUB_ENV"
         echo "BRANCH=${{ inputs.branch }}" >> "$GITHUB_ENV"
         echo "SONARR_MAJOR_VERSION=${{ inputs.major_version }}" >> "$GITHUB_ENV"
-        echo "SONARR_VERSION=${{ inputs.version }}" >> "$GITHUB_ENV"
+        echo "APP_VERSION=${{ inputs.app_version }}" >> "$GITHUB_ENV"
+        echo "RELEASE_VERSION=${{ inputs.release_version }}" >> "$GITHUB_ENV"
 
     - name: Create Packages
       shell: bash

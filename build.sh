@@ -20,11 +20,13 @@ ProgressEnd()
 
 UpdateVersionNumber()
 {
-    if [ "$SONARR_VERSION" != "" ]; then
-        echo "Updating version info to: $SONARR_VERSION"
-        sed -i'' -e "s/<AssemblyVersion>[0-9.*]\+<\/AssemblyVersion>/<AssemblyVersion>$SONARR_VERSION<\/AssemblyVersion>/g" src/Directory.Build.props
+    local appVersion="${APP_VERSION:-$SONARR_VERSION}"
+
+    if [ "$appVersion" != "" ]; then
+        echo "Updating version info to: $appVersion"
+        sed -i'' -e "s/<AssemblyVersion>[0-9.*]\+<\/AssemblyVersion>/<AssemblyVersion>$appVersion<\/AssemblyVersion>/g" src/Directory.Build.props
         sed -i'' -e "s/<AssemblyConfiguration>[\$()A-Za-z-]\+<\/AssemblyConfiguration>/<AssemblyConfiguration>${BRANCH}<\/AssemblyConfiguration>/g" src/Directory.Build.props
-        sed -i'' -e "s/<string>10.0.0.0<\/string>/<string>$SONARR_VERSION<\/string>/g" distribution/macOS/Sonarr.app/Contents/Info.plist
+        sed -i'' -e "s/<string>10.0.0.0<\/string>/<string>$appVersion<\/string>/g" distribution/macOS/Sonarr.app/Contents/Info.plist
     fi
 }
 
@@ -275,6 +277,7 @@ UploadTestArtifacts()
 UploadArtifacts()
 {
     local framework="$1"
+    local artifactVersion="${RELEASE_VERSION:-${APP_VERSION:-$SONARR_VERSION}}"
 
     ProgressStart 'Publishing Artifacts'
 
@@ -283,7 +286,7 @@ UploadArtifacts()
     do
         local runtime=$(basename "$dir")
 
-        echo "##teamcity[publishArtifacts '$artifactsFolder/$runtime/$framework/** => Sonarr.$BRANCH.$SONARR_VERSION.$runtime.zip']"
+        echo "##teamcity[publishArtifacts '$artifactsFolder/$runtime/$framework/** => Sonarr.$BRANCH.$artifactVersion.$runtime.zip']"
     done
 
     # Debian Package / Windows installer / macOS app

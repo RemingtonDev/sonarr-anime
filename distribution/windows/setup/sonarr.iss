@@ -6,8 +6,10 @@
 #define AppURL "https://sonarr.tv/"
 #define ForumsURL "https://forums.sonarr.tv/"
 #define AppExeName "Sonarr.exe"
-#define BuildNumber "4.0"
-#define BuildNumber GetEnv('SONARR_VERSION')
+#define BuildNumber "4.0.17.2952-anime.1"
+#define BuildNumber GetEnv('RELEASE_VERSION')
+#define AppBuildVersion "4.0.17.2952"
+#define AppBuildVersion GetEnv('APP_VERSION')
 #define MajorVersion GetEnv('SONARR_MAJOR_VERSION')
 #define BranchName GetEnv('BRANCH')
 #define Framework GetEnv('FRAMEWORK')
@@ -19,7 +21,7 @@
 ; (To generate a new GUID, click Tools | Generate GUID inside the IDE.)
 AppId={{56C1065D-3523-4025-B76D-6F73F67F7F71}
 AppName={#AppName}
-AppVersion={#MajorVersion}
+AppVersion={#AppBuildVersion}
 AppPublisher={#AppPublisher}
 AppPublisherURL={#AppURL}
 AppSupportURL={#ForumsURL}
@@ -38,7 +40,7 @@ DisableReadyPage=True
 CompressionThreads=2
 Compression=lzma2/normal
 AppContact={#ForumsURL}
-VersionInfoVersion={#MajorVersion}
+VersionInfoVersion={#AppBuildVersion}
 SetupLogging=yes
 OutputDir="..\..\..\_artifacts"
 AppverName={#AppName}

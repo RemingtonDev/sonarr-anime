@@ -4,6 +4,7 @@ outputFolder=_output
 artifactsFolder=_artifacts
 uiFolder="$outputFolder/UI"
 framework="${FRAMEWORK:=net6.0}"
+releaseVersion="${RELEASE_VERSION:-${APP_VERSION}}"
 
 rm -rf $artifactsFolder
 mkdir $artifactsFolder
@@ -13,7 +14,7 @@ do
   name="${runtime##*/}"
   folderName="$runtime/$framework"
   sonarrFolder="$folderName/Sonarr"
-  archiveName="Sonarr.$BRANCH.$SONARR_VERSION.$name"
+  archiveName="Sonarr.$BRANCH.$releaseVersion.$name"
 
   if [[ "$name" == 'UI' ]]; then
     continue

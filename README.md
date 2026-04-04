@@ -16,7 +16,7 @@ Upstream Sonarr's anime search always falls through to per-episode queries — o
 
 Additional capabilities:
 - **Multi-season pack support** — recognizes `S01-S04` range and `S01+S02+S03+S04` list formats, uses them to skip later-season queries
-- **Bare-title pack matching** — releases like `[SubGroup] Series Name [1080p]` with no episode numbers are matched during anime season search
+- **Bare-title pack matching** — during anime season search, releases like `[Group] Example Anime Title [1080p]` can be matched as Season 1 even when they include no episode numbers, no `S01`, and no `Season 1`, as long as they are just the series title plus safe trailing metadata
 - **Anime specials/OVAs** — Season 0 searches use OVA/Special-aware query generation instead of the pack fallback
 - **Bare-title + OVA matching** — releases with inline alternate-title parentheses and trailing metadata are correctly recognized during Season 0 special search
 - **S01+Specials co-coverage** — when a season pack explicitly advertises special content (e.g. `S01+Specials`, `S01+OVA`), the pack maps both the season episodes and exactly one wanted Season 0 special, allowing the S00 search to be skipped entirely

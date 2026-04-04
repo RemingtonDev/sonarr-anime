@@ -15,8 +15,8 @@ on:
         description: "Sonarr major version"
         required: true
         type: string
-      version:
-        description: "Sonarr version"
+      app_version:
+        description: "Sonarr app version"
         required: true
         type: string
     secrets:
@@ -28,7 +28,51 @@ permissions:
   packages: write
 
 jobs:
+  resolve_version:
+    runs-on: ubuntu-latest
+    outputs:
+      release_version: ${{ steps.version.outputs.release_version }}
+
+    steps:
+      - name: Resolve Release Version
+        id: version
+        env:
+          APP_VERSION: ${{ inputs.app_version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pattern="^v${APP_VERSION//./\\.}-anime\\.([0-9]+)$"
+          release_version=""
+          max_suffix=0
+
+          while IFS=$'\t' read -r tag_name target_commitish; do
+            if [[ -z "$tag_name" ]]; then
+              continue
+            fi
+
+            if [[ "$tag_name" =~ $pattern ]]; then
+              suffix="${BASH_REMATCH[1]}"
+
+              if (( suffix > max_suffix )); then
+                max_suffix=$suffix
+              fi
+
+              if [[ "$target_commitish" == "$GITHUB_SHA" ]]; then
+                release_version="${tag_name#v}"
+              fi
+            fi
+          done < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq '.[] | [.tag_name, .target_commitish] | @tsv')
+
+          if [[ -z "$release_version" ]]; then
+            release_version="${APP_VERSION}-anime.$((max_suffix + 1))"
+          fi
+
+          echo "release_version=$release_version" >> "$GITHUB_OUTPUT"
+
   package:
+    needs: resolve_version
     strategy:
       matrix:
         platform: [freebsd, linux, macos, windows]
@@ -59,10 +103,11 @@ jobs:
           artifact: build_${{ matrix.platform }}
           branch: ${{ inputs.branch }}
           major_version: ${{ inputs.major_version }}
-          version: ${{ inputs.version }}
+          app_version: ${{ inputs.app_version }}
+          release_version: ${{ needs.resolve_version.outputs.release_version }}
 
   docker:
-    needs: package
+    needs: [resolve_version, package]
     runs-on: ubuntu-latest
 
     steps:
@@ -127,18 +172,18 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ steps.image.outputs.name }}:${{ inputs.version }}
+            ${{ steps.image.outputs.name }}:${{ needs.resolve_version.outputs.release_version }}
             ${{ steps.image.outputs.name }}:latest
           labels: |
             org.opencontainers.image.title=sonarr-anime
             org.opencontainers.image.description=Anime-focused Sonarr builds
             org.opencontainers.image.url=https://github.com/${{ github.repository }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.version=${{ inputs.version }}
+            org.opencontainers.image.version=${{ needs.resolve_version.outputs.release_version }}
             org.opencontainers.image.revision=${{ github.sha }}
 
   release:
-    needs: [package, docker]
+    needs: [resolve_version, package, docker]
     runs-on: ubuntu-latest
 
     steps:
@@ -152,7 +197,9 @@ jobs:
       - name: Create Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: v${{ inputs.version }}
+          APP_VERSION: ${{ inputs.app_version }}
+          RELEASE_VERSION: ${{ needs.resolve_version.outputs.release_version }}
+          RELEASE_TAG: v${{ needs.resolve_version.outputs.release_version }}
         shell: bash
         run: |
           if gh release view "$RELEASE_TAG" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
@@ -162,6 +209,6 @@ jobs:
 
           gh release create "$RELEASE_TAG" _artifacts/Sonarr.* \
             --repo "${GITHUB_REPOSITORY}" \
-            --title "${{ inputs.version }}" \
-            --notes "Automated release for version ${{ inputs.version }}." \
+            --title "$RELEASE_VERSION" \
+            --notes "Automated release for $RELEASE_VERSION (app version $APP_VERSION)." \
             --target "${GITHUB_SHA}"
