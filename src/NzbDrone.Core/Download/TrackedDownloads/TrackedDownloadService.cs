@@ -154,6 +154,21 @@ namespace NzbDrone.Core.Download.TrackedDownloads
                                 historyItems.Where(v => v.EventType == EpisodeHistoryEventType.Grabbed)
                                     .Select(h => h.EpisodeId).Distinct());
                         }
+                        else if (grabbedEvent != null)
+                        {
+                            _logger.Debug("Unable to parse download title '{0}', using grab history to build episode info", trackedDownload.DownloadItem.Title);
+
+                            trackedDownload.RemoteEpisode = _parsingService.Map(
+                                new ParsedEpisodeInfo
+                                {
+                                    ReleaseTitle = firstHistoryItem.SourceTitle,
+                                    Languages = LanguageParser.ParseLanguages(firstHistoryItem.SourceTitle),
+                                    Quality = QualityParser.ParseQuality(firstHistoryItem.SourceTitle)
+                                },
+                                firstHistoryItem.SeriesId,
+                                historyItems.Where(v => v.EventType == EpisodeHistoryEventType.Grabbed)
+                                    .Select(h => h.EpisodeId).Distinct());
+                        }
                     }
 
                     if (trackedDownload.RemoteEpisode != null)

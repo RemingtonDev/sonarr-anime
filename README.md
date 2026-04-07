@@ -21,6 +21,7 @@ Additional capabilities:
 - **Bare-title + OVA matching** — releases with inline alternate-title parentheses and trailing metadata are correctly recognized during Season 0 special search
 - **S01+Specials co-coverage** — when a season pack explicitly advertises special content (e.g. `S01+Specials`, `S01+OVA`), the pack maps both the season episodes and exactly one wanted Season 0 special, allowing the S00 search to be skipped entirely
 - **Pack-first parity across supported backends** — protocol-backed search backends emit a broad title-only query before season-specific queries, matching the native pack-first behavior. Cross-season dedup prevents the same broad query from being sent twice
+- **Grab history fallback for unparseable titles** — when a download completes with a title that cannot be parsed (common for some anime packs), the fork falls back to the original grab history to identify the series and episodes. This prevents automatic imports from being blocked for releases already validated and approved during the search phase.
 
 ## What this fork does not do
 
