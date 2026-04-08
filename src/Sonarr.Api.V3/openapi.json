@@ -12134,6 +12134,10 @@
             "type": "string",
             "nullable": true
           },
+          "releaseVersion": {
+            "type": "string",
+            "nullable": true
+          },
           "databaseVersion": {
             "type": "string",
             "nullable": true

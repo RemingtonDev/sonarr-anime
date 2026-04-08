@@ -31,7 +31,8 @@ namespace NzbDrone.Core.Test.Download.TrackedDownloads
                      DownloadId = "35238",
                      SourceTitle = "TV Series S01",
                      SeriesId = 5,
-                     EpisodeId = 4
+                     EpisodeId = 4,
+                     EventType = EpisodeHistoryEventType.Grabbed
                 }
                 });
         }
@@ -368,7 +369,8 @@ namespace NzbDrone.Core.Test.Download.TrackedDownloads
                      DownloadId = "35238",
                      SourceTitle = "TV Series Special",
                      SeriesId = 5,
-                     EpisodeId = 4
+                     EpisodeId = 4,
+                     EventType = EpisodeHistoryEventType.Grabbed
                 }
                 });
 
