@@ -133,6 +133,7 @@ Your configuration and database are preserved in the `/config` volume.
 ## Versioning
 
 Releases use Sonarr's normal numeric build versioning.
+The About page also shows this fork's `releaseVersion`, which is the fork-specific release identifier surfaced alongside the normal upstream-style app versioning.
 
 Example:
 
