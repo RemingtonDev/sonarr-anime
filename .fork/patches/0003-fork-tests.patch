@@ -1,0 +1,3160 @@
+diff --git a/src/NzbDrone.Api.Test/Sonarr.Api.Test.csproj b/src/NzbDrone.Api.Test/Sonarr.Api.Test.csproj
+index 053b42cc9dc6c8965dea7ad6c1ee57180acc7373..b7755139acb9b3cedae6881494419d37fdce3577 100644
+--- a/src/NzbDrone.Api.Test/Sonarr.Api.Test.csproj
++++ b/src/NzbDrone.Api.Test/Sonarr.Api.Test.csproj
+@@ -3,7 +3,6 @@
+     <TargetFrameworks>net6.0</TargetFrameworks>
+   </PropertyGroup>
+   <ItemGroup>
+-    <PackageReference Include="GitHubActionsTestLogger" Version="2.3.3" />
+     <PackageReference Include="NBuilder" Version="6.1.0" />
+   </ItemGroup>
+   <ItemGroup>
+diff --git a/src/NzbDrone.Automation.Test/Sonarr.Automation.Test.csproj b/src/NzbDrone.Automation.Test/Sonarr.Automation.Test.csproj
+index 9cf8337896df7c36f33869d5f2df628524b25388..106e0695422b85a2451801c28881f505f2750769 100644
+--- a/src/NzbDrone.Automation.Test/Sonarr.Automation.Test.csproj
++++ b/src/NzbDrone.Automation.Test/Sonarr.Automation.Test.csproj
+@@ -3,7 +3,6 @@
+     <TargetFrameworks>net6.0</TargetFrameworks>
+   </PropertyGroup>
+   <ItemGroup>
+-    <PackageReference Include="GitHubActionsTestLogger" Version="2.3.3" />
+     <PackageReference Include="Selenium.Support" Version="3.141.0" />
+     <PackageReference Include="Selenium.WebDriver.ChromeDriver" Version="111.0.5563.6400" />
+   </ItemGroup>
+diff --git a/src/NzbDrone.Common.Test/Sonarr.Common.Test.csproj b/src/NzbDrone.Common.Test/Sonarr.Common.Test.csproj
+index 402cae2bfc393b6ac3c26d8be86f14d7a1b06862..2d4819b351b97b91a832c20f6fc577bde75aafe5 100644
+--- a/src/NzbDrone.Common.Test/Sonarr.Common.Test.csproj
++++ b/src/NzbDrone.Common.Test/Sonarr.Common.Test.csproj
+@@ -3,7 +3,6 @@
+     <TargetFrameworks>net6.0</TargetFrameworks>
+   </PropertyGroup>
+   <ItemGroup>
+-    <PackageReference Include="GitHubActionsTestLogger" Version="2.3.3" />
+   </ItemGroup>
+   <ItemGroup>
+     <ProjectReference Include="..\NzbDrone.Host\Sonarr.Host.csproj" />
+diff --git a/src/NzbDrone.Core.Test/DecisionEngineTests/DownloadDecisionMakerFixture.cs b/src/NzbDrone.Core.Test/DecisionEngineTests/DownloadDecisionMakerFixture.cs
+index f71a6e2d5e7fb14d311c2936a22bc9868197a00c..bd7ee6a5b80ad98ec7b5d5220b9121753535c8fd 100644
+--- a/src/NzbDrone.Core.Test/DecisionEngineTests/DownloadDecisionMakerFixture.cs
++++ b/src/NzbDrone.Core.Test/DecisionEngineTests/DownloadDecisionMakerFixture.cs
+@@ -10,6 +10,7 @@
+ using NzbDrone.Core.IndexerSearch.Definitions;
+ using NzbDrone.Core.Parser;
+ using NzbDrone.Core.Parser.Model;
++using NzbDrone.Core.Qualities;
+ using NzbDrone.Core.Test.Framework;
+ using NzbDrone.Core.Tv;
+ using NzbDrone.Test.Common;
+@@ -347,5 +348,741 @@ public void should_return_unknown_series_rejection_if_series_title_is_an_alias_f
+             result.Should().HaveCount(1);
+             result.First().Rejections.First().Message.Should().Contain("12345");
+         }
++
++        [TestCase("[SavI0r] El Cazador de la Bruja [DVD][480p][AV1][OPUS][Dual Audio]")]
++        [TestCase("[Exiled-Destiny] El Cazador De La Bruja [Dual Audio]")]
++        [TestCase("El Cazador de la Bruja ( 480p ) [ Eng Subs ]")]
++        public void should_treat_bare_title_as_season_pack_during_anime_season_search(string releaseTitle)
++        {
++            var series = Builder<Series>.CreateNew()
++                .With(s => s.Title = "El Cazador de la Bruja")
++                .With(s => s.TvdbId = 79099)
++                .Build();
++
++            var episodes = new List<Episode> { Builder<Episode>.CreateNew().With(e => e.SeasonNumber = 1).Build() };
++
++            var criteria = new AnimeSeasonSearchCriteria
++            {
++                Series = series,
++                SeasonNumber = 1,
++                SceneTitles = new List<string> { "El Cazador de la Bruja" },
++                Episodes = episodes
++            };
++
++            _reports = new List<ReleaseInfo> { new ReleaseInfo { Title = releaseTitle } };
++
++            var remoteEpisode = new RemoteEpisode
++            {
++                Series = series,
++                Episodes = episodes
++            };
++
++            Mocker.GetMock<IParsingService>()
++                .Setup(c => c.Map(It.IsAny<ParsedEpisodeInfo>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SearchCriteriaBase>()))
++                .Returns(remoteEpisode);
++
++            _pass1.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
++            _pass2.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
++            _pass3.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
++            GivenSpecifications(_pass1, _pass2, _pass3);
++
++            var result = Subject.GetSearchDecision(_reports, criteria).ToList();
++
++            result.Should().HaveCount(1);
++            result.First().Approved.Should().BeTrue();
++
++            Mocker.GetMock<IParsingService>()
++                .Verify(
++                    c => c.Map(
++                        It.Is<ParsedEpisodeInfo>(p => p.FullSeason && p.SeasonNumber == 1 && p.SeriesTitle == "El Cazador de la Bruja"),
++                        It.IsAny<int>(),
++                        It.IsAny<int>(),
++                        It.IsAny<string>(),
++                        It.IsAny<SearchCriteriaBase>()),
++                    Times.Once());
++        }
++
++        [Test]
++        public void should_treat_single_season_alias_only_bare_title_as_season_pack_during_anime_season_search()
++        {
++            var series = Builder<Series>.CreateNew()
++                .With(s => s.Title = "Example Anime Title")
++                .With(s => s.TvdbId = 123456)
++                .Build();
++
++            var episodes = new List<Episode> { Builder<Episode>.CreateNew().With(e => e.SeasonNumber = 1).Build() };
++
++            var criteria = new AnimeSeasonSearchCriteria
++            {
++                Series = series,
++                SeasonNumber = 1,
++                SceneTitles = new List<string> { "Example Anime", "Example Anime Title" },
++                Episodes = episodes
++            };
++
++            _reports = new List<ReleaseInfo> { new ReleaseInfo { Title = "[Group] Example Anime [1080p]" } };
++
++            var remoteEpisode = new RemoteEpisode
++            {
++                Series = series,
++                Episodes = episodes
++            };
++
++            Mocker.GetMock<IParsingService>()
++                .Setup(c => c.Map(It.IsAny<ParsedEpisodeInfo>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SearchCriteriaBase>()))
++                .Returns(remoteEpisode);
++
++            _pass1.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
++            _pass2.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
++            _pass3.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
++            GivenSpecifications(_pass1, _pass2, _pass3);
++
++            var result = Subject.GetSearchDecision(_reports, criteria).ToList();
++
++            result.Should().HaveCount(1);
++            result.First().Approved.Should().BeTrue();
++
++            Mocker.GetMock<IParsingService>()
++                .Verify(
++                    c => c.Map(
++                        It.Is<ParsedEpisodeInfo>(p => p.FullSeason && p.SeasonNumber == 1 && p.SeriesTitle == "Example Anime Title"),
++                        It.IsAny<int>(),
++                        It.IsAny<int>(),
++                        It.IsAny<string>(),
++                        It.IsAny<SearchCriteriaBase>()),
++                    Times.Once());
++        }
++
++        [Test]
++        public void should_treat_bare_title_with_parenthesized_year_as_season_pack_during_anime_season_search()
++        {
++            var series = Builder<Series>.CreateNew()
++                .With(s => s.Title = "Noir")
++                .With(s => s.TvdbId = 79099)
++                .Build();
++
++            var episodes = new List<Episode> { Builder<Episode>.CreateNew().With(e => e.SeasonNumber = 1).Build() };
++
++            var criteria = new AnimeSeasonSearchCriteria
++            {
++                Series = series,
++                SeasonNumber = 1,
++                SceneTitles = new List<string> { "Noir" },
++                Episodes = episodes
++            };
++
++            _reports = new List<ReleaseInfo>
++            {
++                new ReleaseInfo { Title = "[SavI0r] Noir (2001) [BD][1080p][AV1][OPUS][Multi Dual Audio]" }
++            };
++
++            var remoteEpisode = new RemoteEpisode
++            {
++                Series = series,
++                Episodes = episodes
++            };
++
++            Mocker.GetMock<IParsingService>()
++                .Setup(c => c.Map(It.IsAny<ParsedEpisodeInfo>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SearchCriteriaBase>()))
++                .Returns(remoteEpisode);
++
++            _pass1.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
++            GivenSpecifications(_pass1);
++
++            var result = Subject.GetSearchDecision(_reports, criteria).ToList();
++
++            result.Should().HaveCount(1);
++            result.First().Approved.Should().BeTrue();
++
++            Mocker.GetMock<IParsingService>()
++                .Verify(
++                    c => c.Map(
++                        It.Is<ParsedEpisodeInfo>(p =>
++                            p.FullSeason &&
++                            p.SeasonNumber == 1 &&
++                            p.SeriesTitle == "Noir" &&
++                            p.Quality.Quality == Quality.Bluray1080p),
++                        It.IsAny<int>(),
++                        It.IsAny<int>(),
++                        It.IsAny<string>(),
++                        It.IsAny<SearchCriteriaBase>()),
++                    Times.Once());
++        }
++
++        [Test]
++        public void should_not_treat_polluted_short_title_as_season_pack_during_anime_season_search()
++        {
++            var series = Builder<Series>.CreateNew()
++                .With(s => s.Title = "Noir")
++                .With(s => s.TvdbId = 79099)
++                .Build();
++
++            var criteria = new AnimeSeasonSearchCriteria
++            {
++                Series = series,
++                SeasonNumber = 1,
++                SceneTitles = new List<string> { "Noir" },
++                Episodes = new List<Episode>()
++            };
++
++            _reports = new List<ReleaseInfo>
++            {
++                new ReleaseInfo { Title = "[SavI0r] Synduality: Noir [BD][1080p][AV1][OPUS][Multi Dual Audio]" }
++            };
++
++            _pass1.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
++            GivenSpecifications(_pass1);
++
++            var result = Subject.GetSearchDecision(_reports, criteria).ToList();
++
++            result.Should().HaveCount(1);
++            result.First().Rejections.Should().Contain(r => r.Message == "Unable to parse release");
++
++            Mocker.GetMock<IParsingService>()
++                .Verify(
++                    c => c.Map(
++                        It.Is<ParsedEpisodeInfo>(p => p.FullSeason && p.SeriesTitle == "Noir"),
++                        It.IsAny<int>(),
++                        It.IsAny<int>(),
++                        It.IsAny<string>(),
++                        It.IsAny<SearchCriteriaBase>()),
++                    Times.Never());
++        }
++
++        [TestCase("[SavI0r] El Cazador de la Bruja [DVD][480p][AV1][OPUS][Dual Audio]")]
++        public void should_not_treat_bare_title_as_season_pack_outside_anime_search(string releaseTitle)
++        {
++            GivenSpecifications(_pass1, _pass2, _pass3);
++
++            var series = Builder<Series>.CreateNew()
++                .With(s => s.Title = "El Cazador de la Bruja")
++                .Build();
++
++            _reports = new List<ReleaseInfo> { new ReleaseInfo { Title = releaseTitle } };
++
++            // Standard season search (not anime) should reject as unparseable
++            var criteria = new SeasonSearchCriteria
++            {
++                Series = series,
++                SeasonNumber = 1,
++                SceneTitles = new List<string> { "El Cazador de la Bruja" },
++                Episodes = new List<Episode>()
++            };
++
++            var result = Subject.GetSearchDecision(_reports, criteria).ToList();
++
++            result.Should().HaveCount(1);
++            result.First().Rejections.Should().Contain(r => r.Message == "Unable to parse release");
++        }
++
++        [TestCase("[DVD_ISO] El Cazador de la Bruja (US, FUNi)")]
++        [TestCase("[Starlight] El Cazador de la Bruja (h264)")]
++        [TestCase("El Cazador De La Bruja(RAW)")]
++        public void should_not_treat_bare_title_with_unsafe_metadata_as_season_pack(string releaseTitle)
++        {
++            var series = Builder<Series>.CreateNew()
++                .With(s => s.Title = "El Cazador de la Bruja")
++                .With(s => s.TvdbId = 79099)
++                .Build();
++
++            var criteria = new AnimeSeasonSearchCriteria
++            {
++                Series = series,
++                SeasonNumber = 1,
++                SceneTitles = new List<string> { "El Cazador de la Bruja" },
++                Episodes = new List<Episode>()
++            };
++
++            _reports = new List<ReleaseInfo> { new ReleaseInfo { Title = releaseTitle } };
++
++            _pass1.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
++            GivenSpecifications(_pass1);
++
++            var result = Subject.GetSearchDecision(_reports, criteria).ToList();
++
++            result.Should().HaveCount(1);
++            result.First().Rejections.Should().Contain(r => r.Message == "Unable to parse release");
++        }
++
++        [TestCase("[SavI0r] El Cazador de la Bruja OVA [DVD][480p]")]
++        [TestCase("[SavI0r] El Cazador de la Bruja Movie [DVD][480p]")]
++        [TestCase("[SavI0r] El Cazador de la Bruja Special [DVD][480p]")]
++        public void should_not_treat_bare_title_with_special_keywords_as_season_pack(string releaseTitle)
++        {
++            var series = Builder<Series>.CreateNew()
++                .With(s => s.Title = "El Cazador de la Bruja")
++                .With(s => s.TvdbId = 79099)
++                .Build();
++
++            var criteria = new AnimeSeasonSearchCriteria
++            {
++                Series = series,
++                SeasonNumber = 1,
++                SceneTitles = new List<string> { "El Cazador de la Bruja" },
++                Episodes = new List<Episode>()
++            };
++
++            _reports = new List<ReleaseInfo> { new ReleaseInfo { Title = releaseTitle } };
++
++            _pass1.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
++            GivenSpecifications(_pass1);
++
++            var result = Subject.GetSearchDecision(_reports, criteria).ToList();
++
++            result.Should().HaveCount(1);
++            result.First().Rejections.Should().Contain(r => r.Message == "Unable to parse release");
++        }
++
++        [TestCase("[SavI0r] El Cazador de la Bruja [DVD][480p][AV1][OPUS][Dual Audio]")]
++        public void should_not_treat_bare_title_as_season_pack_for_season_0(string releaseTitle)
++        {
++            var series = Builder<Series>.CreateNew()
++                .With(s => s.Title = "El Cazador de la Bruja")
++                .With(s => s.TvdbId = 79099)
++                .Build();
++
++            var criteria = new AnimeSeasonSearchCriteria
++            {
++                Series = series,
++                SeasonNumber = 0,
++                SceneTitles = new List<string> { "El Cazador de la Bruja" },
++                Episodes = new List<Episode>()
++            };
++
++            _reports = new List<ReleaseInfo> { new ReleaseInfo { Title = releaseTitle } };
++
++            _pass1.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
++            GivenSpecifications(_pass1);
++
++            var result = Subject.GetSearchDecision(_reports, criteria).ToList();
++
++            result.Should().HaveCount(1);
++            result.First().Rejections.Should().Contain(r => r.Message == "Unable to parse release");
++        }
++
++        [TestCase("[HcLs] Hai to Gensou no Grimgar + OVA [1080p]")]
++        [TestCase("[Group] Hai to Gensou no Grimgar OVA [720p]")]
++        [TestCase("[Group] Hai to Gensou no Grimgar Special [BD]")]
++        public void should_treat_ova_release_as_special_during_special_search(string releaseTitle)
++        {
++            var series = Builder<Series>.CreateNew()
++                .With(s => s.Title = "Hai to Gensou no Grimgar")
++                .With(s => s.TvdbId = 306141)
++                .With(s => s.SeriesType = SeriesTypes.Anime)
++                .Build();
++
++            var episode = Builder<Episode>.CreateNew()
++                .With(e => e.SeasonNumber = 0)
++                .With(e => e.EpisodeNumber = 1)
++                .Build();
++
++            var criteria = new SpecialEpisodeSearchCriteria
++            {
++                Series = series,
++                SceneTitles = new List<string> { "Hai to Gensou no Grimgar" },
++                Episodes = new List<Episode> { episode },
++                EpisodeQueryTitles = new[] { "Hai to Gensou no Grimgar OVA" }
++            };
++
++            _reports = new List<ReleaseInfo> { new ReleaseInfo { Title = releaseTitle } };
++
++            var remoteEpisode = new RemoteEpisode
++            {
++                Series = series,
++                Episodes = new List<Episode> { episode }
++            };
++
++            Mocker.GetMock<IParsingService>()
++                .Setup(c => c.Map(It.IsAny<ParsedEpisodeInfo>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SearchCriteriaBase>()))
++                .Returns(remoteEpisode);
++
++            _pass1.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
++            GivenSpecifications(_pass1);
++
++            var result = Subject.GetSearchDecision(_reports, criteria).ToList();
++
++            result.Should().HaveCount(1);
++            result.First().Approved.Should().BeTrue();
++
++            Mocker.GetMock<IParsingService>()
++                .Verify(
++                    c => c.Map(
++                        It.Is<ParsedEpisodeInfo>(p => p.SeasonNumber == 0 && p.EpisodeNumbers.Contains(1)),
++                        It.IsAny<int>(),
++                        It.IsAny<int>(),
++                        It.IsAny<string>(),
++                        It.IsAny<SearchCriteriaBase>()),
++                    Times.Once());
++        }
++
++        [TestCase("[Group] Hai to Gensou no Grimgar Extras [BD]")]
++        [TestCase("[Group] Hai to Gensou no Grimgar NCOP [BD]")]
++        [TestCase("[Group] Hai to Gensou no Grimgar NCED [BD]")]
++        [TestCase("[Group] Hai to Gensou no Grimgar Menu [BD]")]
++        [TestCase("[Group] Hai to Gensou no Grimgar Bonus [BD]")]
++        public void should_not_treat_non_episode_markers_as_special(string releaseTitle)
++        {
++            var series = Builder<Series>.CreateNew()
++                .With(s => s.Title = "Hai to Gensou no Grimgar")
++                .With(s => s.TvdbId = 306141)
++                .With(s => s.SeriesType = SeriesTypes.Anime)
++                .Build();
++
++            var episode = Builder<Episode>.CreateNew()
++                .With(e => e.SeasonNumber = 0)
++                .With(e => e.EpisodeNumber = 1)
++                .Build();
++
++            var criteria = new SpecialEpisodeSearchCriteria
++            {
++                Series = series,
++                SceneTitles = new List<string> { "Hai to Gensou no Grimgar" },
++                Episodes = new List<Episode> { episode },
++                EpisodeQueryTitles = new[] { "Hai to Gensou no Grimgar OVA" }
++            };
++
++            _reports = new List<ReleaseInfo> { new ReleaseInfo { Title = releaseTitle } };
++
++            _pass1.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
++            GivenSpecifications(_pass1);
++
++            var result = Subject.GetSearchDecision(_reports, criteria).ToList();
++
++            result.Should().HaveCount(1);
++            result.First().Rejections.Should().Contain(r => r.Message == "Unable to parse release");
++        }
++
++        [Test]
++        public void should_not_use_special_fallback_for_multi_special_search()
++        {
++            var series = Builder<Series>.CreateNew()
++                .With(s => s.Title = "Hai to Gensou no Grimgar")
++                .With(s => s.TvdbId = 306141)
++                .With(s => s.SeriesType = SeriesTypes.Anime)
++                .Build();
++
++            var episodes = new List<Episode>
++            {
++                Builder<Episode>.CreateNew().With(e => e.SeasonNumber = 0).With(e => e.EpisodeNumber = 1).Build(),
++                Builder<Episode>.CreateNew().With(e => e.SeasonNumber = 0).With(e => e.EpisodeNumber = 2).Build()
++            };
++
++            var criteria = new SpecialEpisodeSearchCriteria
++            {
++                Series = series,
++                SceneTitles = new List<string> { "Hai to Gensou no Grimgar" },
++                Episodes = episodes,
++                EpisodeQueryTitles = new[] { "Hai to Gensou no Grimgar OVA" }
++            };
++
++            _reports = new List<ReleaseInfo> { new ReleaseInfo { Title = "[Group] Hai to Gensou no Grimgar OVA [BD]" } };
++
++            _pass1.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
++            GivenSpecifications(_pass1);
++
++            var result = Subject.GetSearchDecision(_reports, criteria).ToList();
++
++            result.Should().HaveCount(1);
++            result.First().Rejections.Should().Contain(r => r.Message == "Unable to parse release");
++        }
++
++        [Test]
++        public void should_not_use_special_fallback_for_non_anime_series()
++        {
++            var series = Builder<Series>.CreateNew()
++                .With(s => s.Title = "Some Show")
++                .With(s => s.TvdbId = 12345)
++                .With(s => s.SeriesType = SeriesTypes.Standard)
++                .Build();
++
++            var episode = Builder<Episode>.CreateNew()
++                .With(e => e.SeasonNumber = 0)
++                .With(e => e.EpisodeNumber = 1)
++                .Build();
++
++            var criteria = new SpecialEpisodeSearchCriteria
++            {
++                Series = series,
++                SceneTitles = new List<string> { "Some Show" },
++                Episodes = new List<Episode> { episode },
++                EpisodeQueryTitles = new[] { "Some Show Special" }
++            };
++
++            _reports = new List<ReleaseInfo> { new ReleaseInfo { Title = "[Group] Some Show Special [BD]" } };
++
++            _pass1.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
++            GivenSpecifications(_pass1);
++
++            var result = Subject.GetSearchDecision(_reports, criteria).ToList();
++
++            result.Should().HaveCount(1);
++            result.First().Rejections.Should().Contain(r => r.Message == "Unable to parse release");
++        }
++
++        [TestCase("[HcLs] Hai to Gensou no Grimgar(Grimgar of Fantasy and Ash) + OVA (Dual Audio) [BD 1080p x265 10bit]_Rokey")]
++        [TestCase("[HcLs] Hai to Gensou no Grimgar (Grimgar of Fantasy and Ash) + OVA (Dual Audio) [BD 1080p x265 10bit]_Rokey")]
++        [TestCase("[SubGroup] Hai to Gensou no Grimgar(Alt Title) + OVA [720p]")]
++        [TestCase("[Group] Hai to Gensou no Grimgar(Alt Title) OVA [BD]-Tag")]
++        public void should_match_bare_title_with_inline_alt_name_and_ova(string releaseTitle)
++        {
++            var series = Builder<Series>.CreateNew()
++                .With(s => s.Title = "Hai to Gensou no Grimgar")
++                .With(s => s.TvdbId = 306141)
++                .With(s => s.SeriesType = SeriesTypes.Anime)
++                .Build();
++
++            var episode = Builder<Episode>.CreateNew()
++                .With(e => e.SeasonNumber = 0)
++                .With(e => e.EpisodeNumber = 1)
++                .Build();
++
++            var criteria = new SpecialEpisodeSearchCriteria
++            {
++                Series = series,
++                SceneTitles = new List<string> { "Hai to Gensou no Grimgar" },
++                Episodes = new List<Episode> { episode },
++                EpisodeQueryTitles = new[] { "Hai to Gensou no Grimgar OVA" }
++            };
++
++            _reports = new List<ReleaseInfo> { new ReleaseInfo { Title = releaseTitle } };
++
++            var remoteEpisode = new RemoteEpisode
++            {
++                Series = series,
++                Episodes = new List<Episode> { episode }
++            };
++
++            Mocker.GetMock<IParsingService>()
++                .Setup(c => c.Map(It.IsAny<ParsedEpisodeInfo>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SearchCriteriaBase>()))
++                .Returns(remoteEpisode);
++
++            _pass1.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
++            GivenSpecifications(_pass1);
++
++            var result = Subject.GetSearchDecision(_reports, criteria).ToList();
++
++            result.Should().HaveCount(1);
++            result.First().Approved.Should().BeTrue();
++
++            Mocker.GetMock<IParsingService>()
++                .Verify(
++                    c => c.Map(
++                        It.Is<ParsedEpisodeInfo>(p => p.SeasonNumber == 0 && p.EpisodeNumbers.Contains(1)),
++                        It.IsAny<int>(),
++                        It.IsAny<int>(),
++                        It.IsAny<string>(),
++                        It.IsAny<SearchCriteriaBase>()),
++                    Times.Once());
++        }
++
++        [Test]
++        public void should_not_accept_bare_title_via_season_pack_fallback_for_season_0()
++        {
++            // A title that would succeed via TryBuildAnimeSeasonPackInfo for Season 1
++            // must be rejected for Season 0 — the guard returns null immediately.
++            var series = Builder<Series>.CreateNew()
++                .With(s => s.Title = "Hai to Gensou no Grimgar")
++                .With(s => s.TvdbId = 306141)
++                .Build();
++
++            var episodes = new List<Episode> { Builder<Episode>.CreateNew().With(e => e.SeasonNumber = 0).Build() };
++
++            var criteria = new AnimeSeasonSearchCriteria
++            {
++                Series = series,
++                SeasonNumber = 0,
++                SceneTitles = new List<string> { "Hai to Gensou no Grimgar" },
++                Episodes = episodes
++            };
++
++            _reports = new List<ReleaseInfo>
++            {
++                new ReleaseInfo { Title = "[F-D] Hai to Gensou no Grimgar [480P][Dual-Audio]" }
++            };
++
++            _pass1.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
++            GivenSpecifications(_pass1);
++
++            var result = Subject.GetSearchDecision(_reports, criteria).ToList();
++
++            result.Should().HaveCount(1);
++            result.First().Rejections.Should().Contain(r => r.Message == "Unable to parse release");
++
++            // Verify Map was never called — the fallback should not have produced a synthetic ParsedEpisodeInfo
++            Mocker.GetMock<IParsingService>()
++                .Verify(
++                    c => c.Map(
++                        It.Is<ParsedEpisodeInfo>(p => p.FullSeason && p.SeasonNumber == 0),
++                        It.IsAny<int>(),
++                        It.IsAny<int>(),
++                        It.IsAny<string>(),
++                        It.IsAny<SearchCriteriaBase>()),
++                    Times.Never());
++        }
++
++        [TestCase("[Group] Sword Art Online S01E01 [720p]")]
++        public void should_not_use_bare_title_fallback_when_parser_resolves_normally(string releaseTitle)
++        {
++            var series = Builder<Series>.CreateNew()
++                .With(s => s.Title = "Sword Art Online")
++                .With(s => s.TvdbId = 259640)
++                .Build();
++
++            var episodes = new List<Episode> { Builder<Episode>.CreateNew().With(e => e.SeasonNumber = 1).Build() };
++
++            var criteria = new AnimeSeasonSearchCriteria
++            {
++                Series = series,
++                SeasonNumber = 1,
++                SceneTitles = new List<string> { "Sword Art Online" },
++                Episodes = episodes
++            };
++
++            _reports = new List<ReleaseInfo> { new ReleaseInfo { Title = releaseTitle } };
++
++            var remoteEpisode = new RemoteEpisode
++            {
++                Series = series,
++                Episodes = episodes
++            };
++
++            Mocker.GetMock<IParsingService>()
++                .Setup(c => c.Map(It.IsAny<ParsedEpisodeInfo>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SearchCriteriaBase>()))
++                .Returns(remoteEpisode);
++
++            _pass1.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
++            GivenSpecifications(_pass1);
++
++            var result = Subject.GetSearchDecision(_reports, criteria).ToList();
++
++            result.Should().HaveCount(1);
++            result.First().Approved.Should().BeTrue();
++
++            // Normal parser should handle this — Map should be called with the parser's output, not a synthetic pack
++            Mocker.GetMock<IParsingService>()
++                .Verify(
++                    c => c.Map(
++                        It.Is<ParsedEpisodeInfo>(p => !p.FullSeason),
++                        It.IsAny<int>(),
++                        It.IsAny<int>(),
++                        It.IsAny<string>(),
++                        It.IsAny<SearchCriteriaBase>()),
++                    Times.Once());
++        }
++
++        [TestCase("[Group] Sword Art Online 01-25 [1080p]")]
++        public void should_not_use_bare_title_fallback_for_absolute_range_release(string releaseTitle)
++        {
++            // Absolute range releases should be parsed normally, not by the bare-title fallback
++            var series = Builder<Series>.CreateNew()
++                .With(s => s.Title = "Sword Art Online")
++                .With(s => s.TvdbId = 259640)
++                .Build();
++
++            var episodes = new List<Episode> { Builder<Episode>.CreateNew().With(e => e.SeasonNumber = 1).Build() };
++
++            var criteria = new AnimeSeasonSearchCriteria
++            {
++                Series = series,
++                SeasonNumber = 1,
++                SceneTitles = new List<string> { "Sword Art Online" },
++                Episodes = episodes
++            };
++
++            _reports = new List<ReleaseInfo> { new ReleaseInfo { Title = releaseTitle } };
++
++            var remoteEpisode = new RemoteEpisode
++            {
++                Series = series,
++                Episodes = episodes
++            };
++
++            Mocker.GetMock<IParsingService>()
++                .Setup(c => c.Map(It.IsAny<ParsedEpisodeInfo>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SearchCriteriaBase>()))
++                .Returns(remoteEpisode);
++
++            _pass1.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
++            GivenSpecifications(_pass1);
++
++            var result = Subject.GetSearchDecision(_reports, criteria).ToList();
++
++            result.Should().HaveCount(1);
++            result.First().Approved.Should().BeTrue();
++
++            // Should use parser's output, not a synthetic full season pack
++            Mocker.GetMock<IParsingService>()
++                .Verify(
++                    c => c.Map(
++                        It.Is<ParsedEpisodeInfo>(p => p.FullSeason),
++                        It.IsAny<int>(),
++                        It.IsAny<int>(),
++                        It.IsAny<string>(),
++                        It.IsAny<SearchCriteriaBase>()),
++                    Times.Never());
++        }
++
++        [Test]
++        public void should_not_treat_bare_title_with_mismatched_tvdbid_as_season_pack()
++        {
++            var series = Builder<Series>.CreateNew()
++                .With(s => s.Title = "El Cazador de la Bruja")
++                .With(s => s.TvdbId = 79099)
++                .Build();
++
++            var criteria = new AnimeSeasonSearchCriteria
++            {
++                Series = series,
++                SeasonNumber = 1,
++                SceneTitles = new List<string> { "El Cazador de la Bruja" },
++                Episodes = new List<Episode>()
++            };
++
++            // Report has a different TvdbId — should be rejected
++            _reports = new List<ReleaseInfo>
++            {
++                new ReleaseInfo { Title = "[Group] El Cazador de la Bruja [DVD]", TvdbId = 99999 }
++            };
++
++            _pass1.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
++            GivenSpecifications(_pass1);
++
++            var result = Subject.GetSearchDecision(_reports, criteria).ToList();
++
++            result.Should().HaveCount(1);
++            result.First().Rejections.Should().Contain(r => r.Message == "Unable to parse release");
++        }
++
++        [Test]
++        public void should_not_use_special_fallback_for_non_season0_episode()
++        {
++            // Ensure the OVA/Special fallback only fires for Season 0 episodes
++            var series = Builder<Series>.CreateNew()
++                .With(s => s.Title = "Test Anime")
++                .With(s => s.SeriesType = SeriesTypes.Anime)
++                .Build();
++
++            var episode = Builder<Episode>.CreateNew()
++                .With(e => e.SeasonNumber = 1)
++                .With(e => e.EpisodeNumber = 1)
++                .Build();
++
++            var criteria = new SpecialEpisodeSearchCriteria
++            {
++                Series = series,
++                SceneTitles = new List<string> { "Test Anime" },
++                Episodes = new List<Episode> { episode },
++                EpisodeQueryTitles = new[] { "Test Anime OVA" }
++            };
++
++            _reports = new List<ReleaseInfo> { new ReleaseInfo { Title = "[Group] Test Anime OVA [BD]" } };
++
++            _pass1.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
++            GivenSpecifications(_pass1);
++
++            var result = Subject.GetSearchDecision(_reports, criteria).ToList();
++
++            result.Should().HaveCount(1);
++            result.First().Rejections.Should().Contain(r => r.Message == "Unable to parse release");
++        }
+     }
+ }
+diff --git a/src/NzbDrone.Core.Test/DecisionEngineTests/MultiSeasonSpecificationFixture.cs b/src/NzbDrone.Core.Test/DecisionEngineTests/MultiSeasonSpecificationFixture.cs
+index 8a853e387ca007e642586e8af493389387d1694d..5a797e100f7ade68efdaf121771e6525f9d962bb 100644
+--- a/src/NzbDrone.Core.Test/DecisionEngineTests/MultiSeasonSpecificationFixture.cs
++++ b/src/NzbDrone.Core.Test/DecisionEngineTests/MultiSeasonSpecificationFixture.cs
+@@ -6,6 +6,7 @@
+ using Moq;
+ using NUnit.Framework;
+ using NzbDrone.Core.DecisionEngine.Specifications;
++using NzbDrone.Core.IndexerSearch.Definitions;
+ using NzbDrone.Core.Parser.Model;
+ using NzbDrone.Core.Test.Framework;
+ using NzbDrone.Core.Tv;
+@@ -20,13 +21,18 @@ public class MultiSeasonSpecificationFixture : CoreTest<MultiSeasonSpecification
+         [SetUp]
+         public void Setup()
+         {
+-            var series = Builder<Series>.CreateNew().With(s => s.Id = 1234).Build();
++            var series = Builder<Series>.CreateNew()
++                .With(s => s.Id = 1234)
++                .With(s => s.SeriesType = SeriesTypes.Standard)
++                .Build();
++
+             _remoteEpisode = new RemoteEpisode
+             {
+                 ParsedEpisodeInfo = new ParsedEpisodeInfo
+                 {
+                     FullSeason = true,
+-                    IsMultiSeason = true
++                    IsMultiSeason = true,
++                    SeasonNumbers = new[] { 1, 2, 3, 4 }
+                 },
+                 Episodes = Builder<Episode>.CreateListOfSize(3)
+                                            .All()
+@@ -56,5 +62,45 @@ public void should_return_false_if_is_a_multi_season_release()
+         {
+             Subject.IsSatisfiedBy(_remoteEpisode, null).Accepted.Should().BeFalse();
+         }
++
++        [Test]
++        public void should_return_false_for_non_anime_multi_season_with_anime_search()
++        {
++            var searchCriteria = new AnimeSeasonSearchCriteria { SeasonNumber = 1 };
++            Subject.IsSatisfiedBy(_remoteEpisode, searchCriteria).Accepted.Should().BeFalse();
++        }
++
++        [Test]
++        public void should_return_true_for_anime_multi_season_with_anime_search()
++        {
++            _remoteEpisode.Series.SeriesType = SeriesTypes.Anime;
++            var searchCriteria = new AnimeSeasonSearchCriteria { SeasonNumber = 1 };
++            Subject.IsSatisfiedBy(_remoteEpisode, searchCriteria).Accepted.Should().BeTrue();
++        }
++
++        [Test]
++        public void should_return_false_for_anime_multi_season_without_anime_search()
++        {
++            _remoteEpisode.Series.SeriesType = SeriesTypes.Anime;
++            Subject.IsSatisfiedBy(_remoteEpisode, null).Accepted.Should().BeFalse();
++        }
++
++        [Test]
++        public void should_reject_anime_multi_season_when_searched_season_is_not_covered()
++        {
++            _remoteEpisode.Series.SeriesType = SeriesTypes.Anime;
++            _remoteEpisode.ParsedEpisodeInfo.SeasonNumbers = new[] { 1, 2, 3, 4 };
++            var searchCriteria = new AnimeSeasonSearchCriteria { SeasonNumber = 5 };
++            Subject.IsSatisfiedBy(_remoteEpisode, searchCriteria).Accepted.Should().BeFalse();
++        }
++
++        [Test]
++        public void should_accept_anime_multi_season_when_searched_season_is_covered()
++        {
++            _remoteEpisode.Series.SeriesType = SeriesTypes.Anime;
++            _remoteEpisode.ParsedEpisodeInfo.SeasonNumbers = new[] { 1, 2, 3, 4 };
++            var searchCriteria = new AnimeSeasonSearchCriteria { SeasonNumber = 3 };
++            Subject.IsSatisfiedBy(_remoteEpisode, searchCriteria).Accepted.Should().BeTrue();
++        }
+     }
+ }
+diff --git a/src/NzbDrone.Core.Test/DecisionEngineTests/Search/SeasonMatchSpecificationFixture.cs b/src/NzbDrone.Core.Test/DecisionEngineTests/Search/SeasonMatchSpecificationFixture.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..c5250373e682d7a4abe9c41b00f64eaba0aa48aa
+--- /dev/null
++++ b/src/NzbDrone.Core.Test/DecisionEngineTests/Search/SeasonMatchSpecificationFixture.cs
+@@ -0,0 +1,56 @@
++using FizzWare.NBuilder;
++using FluentAssertions;
++using NUnit.Framework;
++using NzbDrone.Core.DecisionEngine.Specifications.Search;
++using NzbDrone.Core.IndexerSearch.Definitions;
++using NzbDrone.Core.Parser.Model;
++using NzbDrone.Core.Tv;
++using NzbDrone.Test.Common;
++
++namespace NzbDrone.Core.Test.DecisionEngineTests.Search
++{
++    [TestFixture]
++    public class SeasonMatchSpecificationFixture : TestBase<SeasonMatchSpecification>
++    {
++        private RemoteEpisode _remoteEpisode;
++
++        [SetUp]
++        public void Setup()
++        {
++            var series = Builder<Series>.CreateNew()
++                .Build();
++
++            _remoteEpisode = new RemoteEpisode
++            {
++                Series = series,
++                ParsedEpisodeInfo = new ParsedEpisodeInfo
++                {
++                    SeasonNumber = 1,
++                    FullSeason = true
++                }
++            };
++        }
++
++        [Test]
++        public void should_accept_when_no_search_criteria()
++        {
++            Subject.IsSatisfiedBy(_remoteEpisode, null).Accepted.Should().BeTrue();
++        }
++
++        [Test]
++        public void should_reject_standard_season_mismatch()
++        {
++            var criteria = new SeasonSearchCriteria { SeasonNumber = 3 };
++
++            Subject.IsSatisfiedBy(_remoteEpisode, criteria).Accepted.Should().BeFalse();
++        }
++
++        [Test]
++        public void should_accept_standard_season_match()
++        {
++            var criteria = new SeasonSearchCriteria { SeasonNumber = 1 };
++
++            Subject.IsSatisfiedBy(_remoteEpisode, criteria).Accepted.Should().BeTrue();
++        }
++    }
++}
+diff --git a/src/NzbDrone.Core.Test/Download/CompletedDownloadServiceTests/ProcessFixture.cs b/src/NzbDrone.Core.Test/Download/CompletedDownloadServiceTests/ProcessFixture.cs
+index 0eac8489374b2edaf74b7e8826ff15409c81f169..048d74f63931d39e0ac82f186bf94cfa49b4639e 100644
+--- a/src/NzbDrone.Core.Test/Download/CompletedDownloadServiceTests/ProcessFixture.cs
++++ b/src/NzbDrone.Core.Test/Download/CompletedDownloadServiceTests/ProcessFixture.cs
+@@ -179,6 +179,39 @@ public void should_not_process_when_there_is_a_title_mismatch()
+             AssertNotReadyToImport();
+         }
+ 
++        [Test]
++        public void should_process_badly_named_completed_download_when_grab_history_identifies_series()
++        {
++            _trackedDownload.DownloadItem.DownloadId = "grimgar-pack";
++            _trackedDownload.DownloadItem.Title = "[Datte13] Grimgar of Fantasy and Ash [BD 1080p Hi10] [Dual-Audio FLAC]";
++
++            var grabbedHistory = new EpisodeHistory
++            {
++                DownloadId = "grimgar-pack",
++                SourceTitle = "[Datte13] Grimgar of Fantasy and Ash [BD 1080p Hi10] [Dual-Audio FLAC]",
++                SeriesId = 44,
++                EventType = EpisodeHistoryEventType.Grabbed
++            };
++            grabbedHistory.Data.Add(EpisodeHistory.SERIES_MATCH_TYPE, SeriesMatchType.Alias.ToString());
++            grabbedHistory.Data.Add(EpisodeHistory.RELEASE_SOURCE, ReleaseSourceType.UserInvokedSearch.ToString());
++
++            Mocker.GetMock<IHistoryService>()
++                  .Setup(s => s.FindByDownloadId("grimgar-pack"))
++                  .Returns(new List<EpisodeHistory> { grabbedHistory });
++
++            Mocker.GetMock<IParsingService>()
++                  .Setup(s => s.GetSeries(It.IsAny<string>()))
++                  .Returns((Series)null);
++
++            Mocker.GetMock<ISeriesService>()
++                  .Setup(s => s.GetSeries(44))
++                  .Returns(_trackedDownload.RemoteEpisode.Series);
++
++            Subject.Check(_trackedDownload);
++
++            AssertReadyToImport();
++        }
++
+         private void AssertNotReadyToImport()
+         {
+             _trackedDownload.State.Should().NotBe(TrackedDownloadState.ImportPending);
+diff --git a/src/NzbDrone.Core.Test/Download/TrackedDownloads/TrackedDownloadServiceFixture.cs b/src/NzbDrone.Core.Test/Download/TrackedDownloads/TrackedDownloadServiceFixture.cs
+index 0c07b6386e59fd1349dbdece98b97d1214a7e619..d780dbfc8263d26bd9ccac2f212e3505dd910375 100644
+--- a/src/NzbDrone.Core.Test/Download/TrackedDownloads/TrackedDownloadServiceFixture.cs
++++ b/src/NzbDrone.Core.Test/Download/TrackedDownloads/TrackedDownloadServiceFixture.cs
+@@ -31,7 +31,8 @@ private void GivenDownloadHistory()
+                      DownloadId = "35238",
+                      SourceTitle = "TV Series S01",
+                      SeriesId = 5,
+-                     EpisodeId = 4
++                     EpisodeId = 4,
++                     EventType = EpisodeHistoryEventType.Grabbed
+                 }
+                 });
+         }
+@@ -86,6 +87,189 @@ public void should_track_downloads_using_the_source_title_if_it_cannot_be_found_
+             trackedDownload.RemoteEpisode.MappedSeasonNumber.Should().Be(1);
+         }
+ 
++        [Test]
++        public void should_use_grabbed_history_instead_of_newer_non_grab_history_when_tracking_download()
++        {
++            var grabbedHistory = new EpisodeHistory
++            {
++                DownloadId = "35238",
++                SourceTitle = "TV Series S01",
++                SeriesId = 5,
++                EpisodeId = 4,
++                EventType = EpisodeHistoryEventType.Grabbed
++            };
++
++            var importedHistory = new EpisodeHistory
++            {
++                DownloadId = "35238",
++                SourceTitle = @"C:\DropFolder\TV Series\TV Series - S01E01.mkv",
++                SeriesId = 99,
++                EpisodeId = 999,
++                EventType = EpisodeHistoryEventType.DownloadFolderImported
++            };
++
++            Mocker.GetMock<IHistoryService>()
++                .Setup(s => s.FindByDownloadId("35238"))
++                .Returns(new List<EpisodeHistory> { importedHistory, grabbedHistory });
++
++            var remoteEpisode = new RemoteEpisode
++            {
++                Series = new Series { Id = 5 },
++                Episodes = new List<Episode> { new Episode { Id = 4 } },
++                ParsedEpisodeInfo = new ParsedEpisodeInfo
++                {
++                    SeriesTitle = "TV Series",
++                    SeasonNumber = 1
++                },
++                MappedSeasonNumber = 1
++            };
++
++            Mocker.GetMock<IParsingService>()
++                .Setup(s => s.Map(It.Is<ParsedEpisodeInfo>(i => i.SeasonNumber == 1 && i.SeriesTitle == "TV Series"),
++                    5,
++                    It.Is<IEnumerable<int>>(episodes => episodes.SequenceEqual(new[] { 4 }))))
++                .Returns(remoteEpisode);
++
++            var client = new DownloadClientDefinition
++            {
++                Id = 1,
++                Protocol = DownloadProtocol.Torrent
++            };
++
++            var item = new DownloadClientItem
++            {
++                Title = "The torrent release folder",
++                DownloadId = "35238",
++                DownloadClientInfo = new DownloadClientItemClientInfo
++                {
++                    Protocol = client.Protocol,
++                    Id = client.Id,
++                    Name = client.Name
++                }
++            };
++
++            var trackedDownload = Subject.TrackDownload(client, item);
++
++            trackedDownload.RemoteEpisode.Should().NotBeNull();
++            trackedDownload.RemoteEpisode.Series.Id.Should().Be(5);
++            trackedDownload.RemoteEpisode.Episodes.Select(e => e.Id).Should().Equal(4);
++        }
++
++        [Test]
++        public void should_build_remote_episode_from_grabbed_history_when_titles_are_unparseable()
++        {
++            var grabbedTitle = "[Datte13] Grimgar of Fantasy and Ash [BD 1080p Hi10] [Dual-Audio FLAC]";
++            var grabbedHistory1 = new EpisodeHistory
++            {
++                DownloadId = "grimgar-pack",
++                SourceTitle = grabbedTitle,
++                SeriesId = 44,
++                EpisodeId = 1361,
++                EventType = EpisodeHistoryEventType.Grabbed
++            };
++            var grabbedHistory2 = new EpisodeHistory
++            {
++                DownloadId = "grimgar-pack",
++                SourceTitle = grabbedTitle,
++                SeriesId = 44,
++                EpisodeId = 1362,
++                EventType = EpisodeHistoryEventType.Grabbed
++            };
++            var importedHistory = new EpisodeHistory
++            {
++                DownloadId = "grimgar-pack",
++                SourceTitle = @"/data/media/anime/Grimgar, Ashes and Illusions (2016)/Grimgar, Ashes and Illusions (2016) - S01E01.mkv",
++                SeriesId = 44,
++                EpisodeId = 1361,
++                EventType = EpisodeHistoryEventType.DownloadFolderImported
++            };
++
++            Mocker.GetMock<IHistoryService>()
++                .Setup(s => s.FindByDownloadId("grimgar-pack"))
++                .Returns(new List<EpisodeHistory> { importedHistory, grabbedHistory2, grabbedHistory1 });
++
++            var remoteEpisode = new RemoteEpisode
++            {
++                Series = new Series { Id = 44 },
++                Episodes = new List<Episode> { new Episode { Id = 1361 }, new Episode { Id = 1362 } },
++                ParsedEpisodeInfo = new ParsedEpisodeInfo
++                {
++                    ReleaseTitle = grabbedTitle
++                }
++            };
++
++            Mocker.GetMock<IParsingService>()
++                .Setup(s => s.Map(It.Is<ParsedEpisodeInfo>(i => i.ReleaseTitle == grabbedTitle),
++                    44,
++                    It.Is<IEnumerable<int>>(episodes => episodes.SequenceEqual(new[] { 1362, 1361 }) || episodes.SequenceEqual(new[] { 1361, 1362 }))))
++                .Returns(remoteEpisode);
++
++            var client = new DownloadClientDefinition
++            {
++                Id = 1,
++                Protocol = DownloadProtocol.Torrent
++            };
++
++            var item = new DownloadClientItem
++            {
++                Title = "The torrent release folder",
++                DownloadId = "grimgar-pack",
++                DownloadClientInfo = new DownloadClientItemClientInfo
++                {
++                    Protocol = client.Protocol,
++                    Id = client.Id,
++                    Name = client.Name
++                }
++            };
++
++            var trackedDownload = Subject.TrackDownload(client, item);
++
++            trackedDownload.RemoteEpisode.Should().NotBeNull();
++            trackedDownload.RemoteEpisode.Series.Id.Should().Be(44);
++            trackedDownload.RemoteEpisode.Episodes.Select(e => e.Id).Should().Equal(1361, 1362);
++            trackedDownload.RemoteEpisode.ParsedEpisodeInfo.ReleaseTitle.Should().Be(grabbedTitle);
++        }
++
++        [Test]
++        public void should_leave_download_unresolved_when_no_grabbed_history_exists()
++        {
++            Mocker.GetMock<IHistoryService>()
++                .Setup(s => s.FindByDownloadId("35238"))
++                .Returns(new List<EpisodeHistory>
++                {
++                    new EpisodeHistory
++                    {
++                        DownloadId = "35238",
++                        SourceTitle = @"C:\DropFolder\TV Series\TV Series - S01E01.mkv",
++                        SeriesId = 5,
++                        EpisodeId = 4,
++                        EventType = EpisodeHistoryEventType.DownloadFolderImported
++                    }
++                });
++
++            var client = new DownloadClientDefinition
++            {
++                Id = 1,
++                Protocol = DownloadProtocol.Torrent
++            };
++
++            var item = new DownloadClientItem
++            {
++                Title = "The torrent release folder",
++                DownloadId = "35238",
++                DownloadClientInfo = new DownloadClientItemClientInfo
++                {
++                    Protocol = client.Protocol,
++                    Id = client.Id,
++                    Name = client.Name
++                }
++            };
++
++            var trackedDownload = Subject.TrackDownload(client, item);
++
++            trackedDownload.RemoteEpisode.Should().BeNull();
++        }
++
+         [Test]
+         public void should_set_indexer()
+         {
+@@ -185,7 +369,8 @@ public void should_parse_as_special_when_source_title_parsing_fails()
+                      DownloadId = "35238",
+                      SourceTitle = "TV Series Special",
+                      SeriesId = 5,
+-                     EpisodeId = 4
++                     EpisodeId = 4,
++                     EventType = EpisodeHistoryEventType.Grabbed
+                 }
+                 });
+ 
+diff --git a/src/NzbDrone.Core.Test/Framework/DbTest.cs b/src/NzbDrone.Core.Test/Framework/DbTest.cs
+index fba791b152da41eebf9a4fee0b841acf9be5f5fd..e64779458cc5f50d38c2d3439ffcba8ae756c783 100644
+--- a/src/NzbDrone.Core.Test/Framework/DbTest.cs
++++ b/src/NzbDrone.Core.Test/Framework/DbTest.cs
+@@ -180,7 +180,7 @@ protected void SetupContainer()
+             // Set up remaining container services
+             Mocker.SetConstant(Options.Create(postgresOptions));
+             Mocker.SetConstant<IConfigFileProvider>(Mocker.Resolve<ConfigFileProvider>());
+-            Mocker.SetConstant<IConnectionStringFactory>(Mocker.Resolve<ConnectionStringFactory>());
++            Mocker.SetConstant<IConnectionStringFactory>(new TestConnectionStringFactory(Mocker.Resolve<ConnectionStringFactory>()));
+             Mocker.SetConstant<IMigrationController>(Mocker.Resolve<MigrationController>());
+ 
+             SqlBuilderExtensions.LogSql = true;
+@@ -213,5 +213,39 @@ public void TearDown()
+                 DropPostgresDb();
+             }
+         }
++
++        private class TestConnectionStringFactory : IConnectionStringFactory
++        {
++            public TestConnectionStringFactory(IConnectionStringFactory inner)
++            {
++                MainDbConnection = DisablePooling(inner.MainDbConnection);
++                LogDbConnection = DisablePooling(inner.LogDbConnection);
++            }
++
++            public DatabaseConnectionInfo MainDbConnection { get; }
++            public DatabaseConnectionInfo LogDbConnection { get; }
++
++            public string GetDatabasePath(string connectionString)
++            {
++                var connectionBuilder = new SQLiteConnectionStringBuilder(connectionString);
++
++                return connectionBuilder.DataSource;
++            }
++
++            private static DatabaseConnectionInfo DisablePooling(DatabaseConnectionInfo connectionInfo)
++            {
++                if (connectionInfo.DatabaseType != DatabaseType.SQLite)
++                {
++                    return connectionInfo;
++                }
++
++                var connectionBuilder = new SQLiteConnectionStringBuilder(connectionInfo.ConnectionString)
++                {
++                    Pooling = false
++                };
++
++                return new DatabaseConnectionInfo(connectionInfo.DatabaseType, connectionBuilder.ConnectionString);
++            }
++        }
+     }
+ }
+diff --git a/src/NzbDrone.Core.Test/Framework/MigrationTest.cs b/src/NzbDrone.Core.Test/Framework/MigrationTest.cs
+index 9ac581a83eae6b21e585f100db9625ba1d65c720..d6fb692f72b5a4967616a6d7130abb6cebc1e97f 100644
+--- a/src/NzbDrone.Core.Test/Framework/MigrationTest.cs
++++ b/src/NzbDrone.Core.Test/Framework/MigrationTest.cs
+@@ -2,7 +2,7 @@
+ using System.Data;
+ using FluentMigrator;
+ using Microsoft.Extensions.Logging;
+-using NLog.Extensions.Logging;
++using Microsoft.Extensions.Logging.Abstractions;
+ using NUnit.Framework;
+ using NzbDrone.Core.Datastore.Migration.Framework;
+ 
+@@ -33,7 +33,7 @@ protected virtual IDbConnection WithDapperMigrationTestDb(Action<TMigration> bef
+ 
+         protected override void SetupLogging()
+         {
+-            Mocker.SetConstant<ILoggerProvider>(Mocker.Resolve<NLogLoggerProvider>());
++            Mocker.SetConstant<ILoggerProvider>(NullLoggerProvider.Instance);
+         }
+ 
+         private ITestDatabase WithMigrationAction(Action<TMigration> beforeMigration = null)
+diff --git a/src/NzbDrone.Core.Test/IndexerSearchTests/ReleaseSearchServiceFixture.cs b/src/NzbDrone.Core.Test/IndexerSearchTests/ReleaseSearchServiceFixture.cs
+index 0da5fb02afb0deb75bbe12d24506148bd6573064..d9ac14fc760c4102ba986e0052e27a19ea6f1e7b 100644
+--- a/src/NzbDrone.Core.Test/IndexerSearchTests/ReleaseSearchServiceFixture.cs
++++ b/src/NzbDrone.Core.Test/IndexerSearchTests/ReleaseSearchServiceFixture.cs
+@@ -12,6 +12,7 @@
+ using NzbDrone.Core.Indexers;
+ using NzbDrone.Core.IndexerSearch;
+ using NzbDrone.Core.IndexerSearch.Definitions;
++using NzbDrone.Core.Parser.Model;
+ using NzbDrone.Core.Test.Framework;
+ using NzbDrone.Core.Tv;
+ 
+@@ -569,6 +570,225 @@ public async Task getscenenames_should_use_seasonnumber_if_no_scene_seasonnumber
+             allCriteria.First().As<SeasonSearchCriteria>().SeasonNumber.Should().Be(7);
+         }
+ 
++        private void SetupAnimeSeasonWithApprovedDecisions(List<Episode> coveredEpisodes)
++        {
++            var remoteEpisode = new RemoteEpisode
++            {
++                Release = new ReleaseInfo { Guid = "test-season-pack-1", Title = "Test Season Pack" },
++                Episodes = coveredEpisodes,
++                Series = _xemSeries
++            };
++
++            var approvedDecision = new DownloadDecision(remoteEpisode);
++            var approvedList = new List<DownloadDecision> { approvedDecision };
++
++            Mocker.GetMock<IMakeDownloadDecision>()
++                .Setup(s => s.GetSearchDecision(It.IsAny<List<ReleaseInfo>>(), It.IsAny<SearchCriteriaBase>()))
++                .Returns<List<ReleaseInfo>, SearchCriteriaBase>((reports, criteria) =>
++                    criteria is AnimeSeasonSearchCriteria ? approvedList : new List<DownloadDecision>());
++        }
++
++        private void WithAnimeEpisode(int id, int seasonNumber, int episodeNumber, int absoluteEpisodeNumber)
++        {
++            var episode = Builder<Episode>.CreateNew()
++                .With(v => v.Id, id)
++                .With(v => v.SeriesId, _xemSeries.Id)
++                .With(v => v.Series, _xemSeries)
++                .With(v => v.SeasonNumber, seasonNumber)
++                .With(v => v.EpisodeNumber, episodeNumber)
++                .With(v => v.AbsoluteEpisodeNumber, absoluteEpisodeNumber)
++                .With(v => v.SceneSeasonNumber, (int?)null)
++                .With(v => v.SceneEpisodeNumber, (int?)null)
++                .With(v => v.SceneAbsoluteEpisodeNumber, (int?)null)
++                .With(v => v.AirDate, $"{2000 + seasonNumber}-{(episodeNumber % 12) + 1:00}-05")
++                .With(v => v.AirDateUtc, DateTime.UtcNow.AddDays(-30))
++                .With(v => v.Monitored, true)
++                .With(v => v.EpisodeFileId, 0)
++                .Build();
++
++            _xemEpisodes.Add(episode);
++        }
++
++        [Test]
++        public async Task anime_season_search_should_skip_all_episodes_when_fully_covered()
++        {
++            _xemSeries.SeriesType = SeriesTypes.Anime;
++            WithAnimeEpisode(101, 1, 1, 1);
++            WithAnimeEpisode(102, 1, 2, 2);
++
++            var seasonEpisodes = _xemEpisodes.Where(e => e.SeasonNumber == 1).ToList();
++            SetupAnimeSeasonWithApprovedDecisions(seasonEpisodes);
++
++            var allCriteria = WatchForSearchCriteria();
++
++            await Subject.SeasonSearch(_xemSeries.Id, 1, true, false, true, false);
++
++            var animeCriteria = allCriteria.OfType<AnimeEpisodeSearchCriteria>().ToList();
++            animeCriteria.Count.Should().Be(0);
++        }
++
++        [Test]
++        public async Task anime_season_search_should_search_all_episodes_when_none_covered()
++        {
++            _xemSeries.SeriesType = SeriesTypes.Anime;
++            WithAnimeEpisode(201, 1, 1, 1);
++            WithAnimeEpisode(202, 1, 2, 2);
++
++            var allCriteria = WatchForSearchCriteria();
++
++            await Subject.SeasonSearch(_xemSeries.Id, 1, true, false, true, false);
++
++            var animeCriteria = allCriteria.OfType<AnimeEpisodeSearchCriteria>().ToList();
++            animeCriteria.Count.Should().Be(2);
++        }
++
++        [Test]
++        public async Task anime_season_search_should_only_search_uncovered_episodes()
++        {
++            _xemSeries.SeriesType = SeriesTypes.Anime;
++            WithAnimeEpisode(301, 1, 1, 1);
++            WithAnimeEpisode(302, 1, 2, 2);
++
++            // Cover only the first episode
++            SetupAnimeSeasonWithApprovedDecisions(new List<Episode> { _xemEpisodes.First() });
++
++            var allCriteria = WatchForSearchCriteria();
++
++            await Subject.SeasonSearch(_xemSeries.Id, 1, true, false, true, false);
++
++            var animeCriteria = allCriteria.OfType<AnimeEpisodeSearchCriteria>().ToList();
++            animeCriteria.Count.Should().Be(1);
++        }
++
++        [Test]
++        public async Task anime_season_0_search_should_use_special_search_not_anime_season_search()
++        {
++            _xemSeries.SeriesType = SeriesTypes.Anime;
++            WithAnimeEpisode(401, 0, 1, 0);
++
++            var allCriteria = WatchForSearchCriteria();
++
++            await Subject.SeasonSearch(_xemSeries.Id, 0, false, false, true, false);
++
++            var animeCriteria = allCriteria.OfType<AnimeSeasonSearchCriteria>().ToList();
++            animeCriteria.Count.Should().Be(0, "Season 0 should not use AnimeSeasonSearchCriteria");
++
++            var specialCriteria = allCriteria.OfType<SpecialEpisodeSearchCriteria>().ToList();
++            specialCriteria.Count.Should().Be(1, "Season 0 should use SpecialEpisodeSearchCriteria");
++        }
++
++        [Test]
++        public async Task anime_season_0_search_should_not_affect_season_1_routing()
++        {
++            _xemSeries.SeriesType = SeriesTypes.Anime;
++            WithAnimeEpisode(501, 1, 1, 1);
++            WithAnimeEpisode(502, 1, 2, 2);
++
++            var allCriteria = WatchForSearchCriteria();
++
++            await Subject.SeasonSearch(_xemSeries.Id, 1, true, false, true, false);
++
++            var animeCriteria = allCriteria.OfType<AnimeSeasonSearchCriteria>().ToList();
++            animeCriteria.Count.Should().BeGreaterThan(0, "Season 1 should still use AnimeSeasonSearchCriteria");
++
++            var specialCriteria = allCriteria.OfType<SpecialEpisodeSearchCriteria>().ToList();
++            specialCriteria.Count.Should().Be(0, "Season 1 should not use SpecialEpisodeSearchCriteria");
++        }
++
++        [Test]
++        public async Task multi_season_anime_search_should_accumulate_broad_queries_across_seasons()
++        {
++            _xemSeries.SeriesType = SeriesTypes.Anime;
++            WithAnimeEpisode(101, 1, 1, 1);
++            WithAnimeEpisode(102, 1, 2, 2);
++            WithAnimeEpisode(201, 2, 1, 13);
++            WithAnimeEpisode(202, 2, 2, 14);
++
++            WatchForSearchCriteria();
++
++            var broadEmitted = new HashSet<string>();
++            await Subject.SeasonSearch(_xemSeries.Id, 1, true, false, true, false, broadEmitted);
++
++            // After S1, broadEmitted should contain the series' scene titles
++            broadEmitted.Should().NotBeEmpty();
++            broadEmitted.Should().Contain(_xemSeries.Title);
++        }
++
++        [Test]
++        public async Task multi_season_anime_search_should_pass_accumulated_broad_queries_to_later_seasons()
++        {
++            _xemSeries.SeriesType = SeriesTypes.Anime;
++            WithAnimeEpisode(101, 1, 1, 1);
++            WithAnimeEpisode(102, 1, 2, 2);
++            WithAnimeEpisode(201, 2, 1, 13);
++            WithAnimeEpisode(202, 2, 2, 14);
++
++            // Capture BroadQueriesEmitted snapshots at the time of each Fetch
++            var broadSnapshots = new List<string[]>();
++            _mockIndexer.Setup(v => v.Fetch(It.IsAny<AnimeSeasonSearchCriteria>()))
++                .Callback<AnimeSeasonSearchCriteria>(s =>
++                    broadSnapshots.Add(s.BroadQueriesEmitted?.ToArray() ?? Array.Empty<string>()))
++                .Returns(Task.FromResult<IList<ReleaseInfo>>(new List<ReleaseInfo>()));
++
++            _mockIndexer.Setup(v => v.Fetch(It.IsAny<AnimeEpisodeSearchCriteria>()))
++                .Returns(Task.FromResult<IList<ReleaseInfo>>(new List<ReleaseInfo>()));
++
++            var broadEmitted = new HashSet<string>();
++            await Subject.SeasonSearch(_xemSeries.Id, 1, true, false, true, false, broadEmitted);
++            await Subject.SeasonSearch(_xemSeries.Id, 2, true, false, true, false, broadEmitted);
++
++            broadSnapshots.Should().HaveCount(2);
++
++            // S1 should receive empty emitted set (no prior seasons)
++            broadSnapshots[0].Should().BeEmpty();
++
++            // S2 should receive the titles that S1 added
++            broadSnapshots[1].Should().NotBeEmpty();
++            broadSnapshots[1].Should().Contain(_xemSeries.Title);
++        }
++
++        [Test]
++        public async Task anime_season_0_should_not_pollute_cross_season_broad_query_state()
++        {
++            _xemSeries.SeriesType = SeriesTypes.Anime;
++            WithAnimeEpisode(401, 0, 1, 0);
++
++            WatchForSearchCriteria();
++
++            var broadEmitted = new HashSet<string>();
++            await Subject.SeasonSearch(_xemSeries.Id, 0, false, false, true, false, broadEmitted);
++
++            // Season 0 uses SpecialEpisodeSearchCriteria, should not touch broadEmitted
++            broadEmitted.Should().BeEmpty();
++        }
++
++        [Test]
++        public async Task broad_query_state_should_deduplicate_scene_titles()
++        {
++            _xemSeries.SeriesType = SeriesTypes.Anime;
++            _xemSeries.Title = "Test Anime";
++            WithAnimeEpisode(101, 1, 1, 1);
++            WithAnimeEpisode(102, 1, 2, 2);
++
++            Mocker.GetMock<ISeriesService>()
++                .Setup(v => v.GetSeries(_xemSeries.Id))
++                .Returns(_xemSeries);
++
++            // Scene mapping returns duplicate titles
++            Mocker.GetMock<ISceneMappingService>()
++                .Setup(s => s.GetSceneNames(It.IsAny<int>(), It.IsAny<List<int>>(), It.IsAny<List<int>>()))
++                .Returns(new List<string> { "Test Anime", "Test Anime" });
++
++            WatchForSearchCriteria();
++
++            var broadEmitted = new HashSet<string>();
++            await Subject.SeasonSearch(_xemSeries.Id, 1, true, false, true, false, broadEmitted);
++
++            // HashSet should naturally deduplicate — "Test Anime" appears twice in SceneTitles
++            // but UnionWith deduplicates
++            broadEmitted.Should().HaveCount(1);
++        }
++
+         [Test]
+         public async Task episode_search_should_use_all_available_numbering_from_services_and_xem()
+         {
+@@ -650,5 +870,208 @@ public async Task episode_search_should_include_series_title_when_not_a_direct_t
+             allCriteria.Last().As<SingleEpisodeSearchCriteria>().SeasonNumber.Should().Be(2);
+             allCriteria.Last().As<SingleEpisodeSearchCriteria>().EpisodeNumber.Should().Be(3);
+         }
++
++        [Test]
++        public async Task anime_season_search_should_exclude_cross_season_covered_episodes_from_fallback()
++        {
++            _xemSeries.SeriesType = SeriesTypes.Anime;
++            WithAnimeEpisode(301, 1, 1, 1);
++            WithAnimeEpisode(302, 1, 2, 2);
++
++            // No approved results from season search (so within-season coverage is empty)
++            // but episode 301 is already covered by cross-season grab
++            var alreadyCovered = new HashSet<int> { 301 };
++
++            var allCriteria = WatchForSearchCriteria();
++
++            await Subject.SeasonSearch(_xemSeries.Id, 1, true, false, true, false, null, alreadyCovered);
++
++            // Only the uncovered episode (302) should get an individual search
++            var animeCriteria = allCriteria.OfType<AnimeEpisodeSearchCriteria>().ToList();
++            animeCriteria.Count.Should().Be(1);
++            animeCriteria[0].AbsoluteEpisodeNumber.Should().Be(2);
++        }
++
++        [Test]
++        public async Task anime_season_search_should_skip_all_when_cross_season_covers_everything()
++        {
++            _xemSeries.SeriesType = SeriesTypes.Anime;
++            WithAnimeEpisode(301, 1, 1, 1);
++            WithAnimeEpisode(302, 1, 2, 2);
++
++            // Both episodes already covered by cross-season grabs
++            var alreadyCovered = new HashSet<int> { 301, 302 };
++
++            var allCriteria = WatchForSearchCriteria();
++
++            await Subject.SeasonSearch(_xemSeries.Id, 1, true, false, true, false, null, alreadyCovered);
++
++            // No individual episode searches should happen
++            var animeCriteria = allCriteria.OfType<AnimeEpisodeSearchCriteria>().ToList();
++            animeCriteria.Count.Should().Be(0);
++        }
++
++        [Test]
++        public async Task anime_season_search_should_combine_season_and_cross_season_coverage()
++        {
++            _xemSeries.SeriesType = SeriesTypes.Anime;
++            WithAnimeEpisode(301, 1, 1, 1);
++            WithAnimeEpisode(302, 1, 2, 2);
++            WithAnimeEpisode(303, 1, 3, 3);
++
++            // Episode 301 covered by cross-season grab
++            var alreadyCovered = new HashSet<int> { 301 };
++
++            // Episode 302 covered by approved season search result
++            SetupAnimeSeasonWithApprovedDecisions(new List<Episode> { _xemEpisodes[1] });
++
++            var allCriteria = WatchForSearchCriteria();
++
++            await Subject.SeasonSearch(_xemSeries.Id, 1, true, false, true, false, null, alreadyCovered);
++
++            // Only episode 303 (uncovered by both) should get individual search
++            var animeCriteria = allCriteria.OfType<AnimeEpisodeSearchCriteria>().ToList();
++            animeCriteria.Count.Should().Be(1);
++            animeCriteria[0].AbsoluteEpisodeNumber.Should().Be(3);
++        }
++
++        [Test]
++        public async Task anime_multi_episode_approved_result_should_only_suppress_mapped_episodes()
++        {
++            _xemSeries.SeriesType = SeriesTypes.Anime;
++            WithAnimeEpisode(301, 1, 1, 1);
++            WithAnimeEpisode(302, 1, 2, 2);
++            WithAnimeEpisode(303, 1, 3, 3);
++
++            // Approved result covers episodes 1 and 2 only (multi-episode release)
++            var ep1 = _xemEpisodes[0];
++            var ep2 = _xemEpisodes[1];
++            SetupAnimeSeasonWithApprovedDecisions(new List<Episode> { ep1, ep2 });
++
++            var allCriteria = WatchForSearchCriteria();
++
++            await Subject.SeasonSearch(_xemSeries.Id, 1, true, false, true, false);
++
++            // Only episode 3 should get individual search
++            var animeCriteria = allCriteria.OfType<AnimeEpisodeSearchCriteria>().ToList();
++            animeCriteria.Count.Should().Be(1);
++            animeCriteria[0].AbsoluteEpisodeNumber.Should().Be(3);
++        }
++
++        [Test]
++        public async Task standard_series_season_search_should_not_use_anime_cascade()
++        {
++            _xemSeries.SeriesType = SeriesTypes.Standard;
++            WithEpisode(1, 1, null, null);
++            WithEpisode(1, 2, null, null);
++
++            var allCriteria = WatchForSearchCriteria();
++
++            await Subject.SeasonSearch(_xemSeries.Id, 1, false, false, true, false);
++
++            // Standard series should use SeasonSearchCriteria, not anime criteria
++            var seasonCriteria = allCriteria.OfType<SeasonSearchCriteria>().ToList();
++            seasonCriteria.Count.Should().BeGreaterThan(0);
++
++            var animeCriteria = allCriteria.OfType<AnimeSeasonSearchCriteria>().ToList();
++            animeCriteria.Count.Should().Be(0);
++
++            var animeEpCriteria = allCriteria.OfType<AnimeEpisodeSearchCriteria>().ToList();
++            animeEpCriteria.Count.Should().Be(0);
++        }
++
++        private void SetupSpecialSearchWithApprovedDecisions(List<Episode> coveredEpisodes)
++        {
++            var remoteEpisode = new RemoteEpisode
++            {
++                Release = new ReleaseInfo { Guid = "test-special-pack-1", Title = "Test Special Pack" },
++                Episodes = coveredEpisodes,
++                Series = _xemSeries
++            };
++
++            var approvedDecision = new DownloadDecision(remoteEpisode);
++            var approvedList = new List<DownloadDecision> { approvedDecision };
++
++            Mocker.GetMock<IMakeDownloadDecision>()
++                .Setup(s => s.GetSearchDecision(It.IsAny<List<ReleaseInfo>>(), It.IsAny<SearchCriteriaBase>()))
++                .Returns<List<ReleaseInfo>, SearchCriteriaBase>((reports, criteria) =>
++                    criteria is SpecialEpisodeSearchCriteria ? approvedList : new List<DownloadDecision>());
++        }
++
++        [Test]
++        public async Task special_search_should_skip_per_episode_fallback_when_fully_covered()
++        {
++            _xemSeries.SeriesType = SeriesTypes.Anime;
++            WithAnimeEpisode(401, 0, 1, 0);
++            WithAnimeEpisode(402, 0, 2, 0);
++
++            var specialEpisodes = _xemEpisodes.Where(e => e.SeasonNumber == 0).ToList();
++            SetupSpecialSearchWithApprovedDecisions(specialEpisodes);
++
++            var allCriteria = WatchForSearchCriteria();
++
++            await Subject.SeasonSearch(_xemSeries.Id, 0, false, false, true, false);
++
++            // No SingleEpisodeSearchCriteria should fire — specials are fully covered
++            var singleCriteria = allCriteria.OfType<SingleEpisodeSearchCriteria>().ToList();
++            singleCriteria.Count.Should().Be(0);
++        }
++
++        [Test]
++        public async Task special_search_should_only_search_uncovered_specials()
++        {
++            _xemSeries.SeriesType = SeriesTypes.Anime;
++            WithAnimeEpisode(401, 0, 1, 0);
++            WithAnimeEpisode(402, 0, 2, 0);
++
++            // Only the first special is covered
++            SetupSpecialSearchWithApprovedDecisions(new List<Episode> { _xemEpisodes[0] });
++
++            var allCriteria = WatchForSearchCriteria();
++
++            await Subject.SeasonSearch(_xemSeries.Id, 0, false, false, true, false);
++
++            // Only the second special (uncovered) should get a per-episode search
++            var singleCriteria = allCriteria.OfType<SingleEpisodeSearchCriteria>().ToList();
++            singleCriteria.Count.Should().Be(1);
++            singleCriteria[0].EpisodeNumber.Should().Be(2);
++        }
++
++        [Test]
++        public async Task special_search_should_fall_through_all_when_none_covered()
++        {
++            _xemSeries.SeriesType = SeriesTypes.Anime;
++            WithAnimeEpisode(401, 0, 1, 0);
++            WithAnimeEpisode(402, 0, 2, 0);
++
++            // No approved results for special search
++            var allCriteria = WatchForSearchCriteria();
++
++            await Subject.SeasonSearch(_xemSeries.Id, 0, false, false, true, false);
++
++            // Both specials should get per-episode search
++            var singleCriteria = allCriteria.OfType<SingleEpisodeSearchCriteria>().ToList();
++            singleCriteria.Count.Should().Be(2);
++        }
++
++        [Test]
++        public async Task special_search_should_not_search_unmonitored_specials_in_fallback()
++        {
++            _xemSeries.SeriesType = SeriesTypes.Anime;
++            WithAnimeEpisode(401, 0, 1, 0);
++            WithAnimeEpisode(402, 0, 2, 0);
++
++            // Make second special unmonitored
++            _xemEpisodes[1].Monitored = false;
++
++            var allCriteria = WatchForSearchCriteria();
++
++            await Subject.SeasonSearch(_xemSeries.Id, 0, false, true, true, false);
++
++            // Only the monitored special should get a per-episode search
++            var singleCriteria = allCriteria.OfType<SingleEpisodeSearchCriteria>().ToList();
++            singleCriteria.Count.Should().Be(1);
++            singleCriteria[0].EpisodeNumber.Should().Be(1);
++        }
+     }
+ }
+diff --git a/src/NzbDrone.Core.Test/IndexerSearchTests/SeriesSearchServiceFixture.cs b/src/NzbDrone.Core.Test/IndexerSearchTests/SeriesSearchServiceFixture.cs
+index ab6ab0755250a549860eccad41a530bee901e335..08fb4a247b768d3bb22bf88f3f3925cd7f13105a 100644
+--- a/src/NzbDrone.Core.Test/IndexerSearchTests/SeriesSearchServiceFixture.cs
++++ b/src/NzbDrone.Core.Test/IndexerSearchTests/SeriesSearchServiceFixture.cs
+@@ -1,6 +1,7 @@
+ using System.Collections.Generic;
+ using System.Linq;
+ using System.Threading.Tasks;
++using FizzWare.NBuilder;
+ using FluentAssertions;
+ using Moq;
+ using NUnit.Framework;
+@@ -8,6 +9,7 @@
+ using NzbDrone.Core.Download;
+ using NzbDrone.Core.IndexerSearch;
+ using NzbDrone.Core.Messaging.Commands;
++using NzbDrone.Core.Parser.Model;
+ using NzbDrone.Core.Test.Framework;
+ using NzbDrone.Core.Tv;
+ 
+@@ -36,6 +38,10 @@ public void Setup()
+                   .Setup(s => s.SeasonSearch(_series.Id, It.IsAny<int>(), false, false, true, false))
+                   .Returns(Task.FromResult(new List<DownloadDecision>()));
+ 
++            Mocker.GetMock<ISearchForReleases>()
++                  .Setup(s => s.SeasonSearch(_series.Id, It.IsAny<int>(), false, true, true, false, It.IsAny<HashSet<string>>(), It.IsAny<HashSet<int>>()))
++                  .Returns(Task.FromResult(new List<DownloadDecision>()));
++
+             Mocker.GetMock<IProcessDownloadDecisions>()
+                   .Setup(s => s.ProcessDecisions(It.IsAny<List<DownloadDecision>>()))
+                   .Returns(Task.FromResult(new ProcessedDecisions(new List<DownloadDecision>(), new List<DownloadDecision>(), new List<DownloadDecision>())));
+@@ -77,5 +83,348 @@ public void should_start_with_lower_seasons_first()
+ 
+             seasonOrder.First().Should().Be(_series.Seasons.OrderBy(s => s.SeasonNumber).First().SeasonNumber);
+         }
++
++        [Test]
++        public void should_skip_later_anime_season_when_earlier_grab_already_covers_it()
++        {
++            var seasonSearches = new List<int>();
++            var season1Episode = Builder<Episode>.CreateNew()
++                .With(e => e.Id = 11)
++                .With(e => e.SeriesId = _series.Id)
++                .With(e => e.SeasonNumber = 1)
++                .With(e => e.Monitored = true)
++                .With(e => e.EpisodeFileId = 0)
++                .With(e => e.AirDateUtc = System.DateTime.UtcNow.AddDays(-1))
++                .Build();
++            var season2Episode = Builder<Episode>.CreateNew()
++                .With(e => e.Id = 22)
++                .With(e => e.SeriesId = _series.Id)
++                .With(e => e.SeasonNumber = 2)
++                .With(e => e.Monitored = true)
++                .With(e => e.EpisodeFileId = 0)
++                .With(e => e.AirDateUtc = System.DateTime.UtcNow.AddDays(-1))
++                .Build();
++
++            _series.SeriesType = SeriesTypes.Anime;
++            _series.Seasons = new List<Season>
++            {
++                new Season { SeasonNumber = 1, Monitored = true },
++                new Season { SeasonNumber = 2, Monitored = true }
++            };
++
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySeason(_series.Id, 1))
++                .Returns(new List<Episode> { season1Episode });
++
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySeason(_series.Id, 2))
++                .Returns(new List<Episode> { season2Episode });
++
++            Mocker.GetMock<ISearchForReleases>()
++                .Setup(s => s.SeasonSearch(_series.Id, It.IsAny<int>(), false, true, true, false, It.IsAny<HashSet<string>>(), It.IsAny<HashSet<int>>()))
++                .Returns(Task.FromResult(new List<DownloadDecision>()))
++                .Callback<int, int, bool, bool, bool, bool, HashSet<string>, HashSet<int>>((seriesId, seasonNumber, missingOnly, monitoredOnly, userInvokedSearch, interactiveSearch, broadQueries, coveredIds) => seasonSearches.Add(seasonNumber));
++
++            var grabbedDecision = new DownloadDecision(new RemoteEpisode
++            {
++                Episodes = new List<Episode> { season1Episode, season2Episode },
++                ParsedEpisodeInfo = new ParsedEpisodeInfo()
++            });
++
++            Mocker.GetMock<IProcessDownloadDecisions>()
++                .SetupSequence(s => s.ProcessDecisions(It.IsAny<List<DownloadDecision>>()))
++                .Returns(Task.FromResult(new ProcessedDecisions(new List<DownloadDecision> { grabbedDecision }, new List<DownloadDecision>(), new List<DownloadDecision>())));
++
++            Subject.Execute(new SeriesSearchCommand { SeriesId = _series.Id, Trigger = CommandTrigger.Manual });
++
++            seasonSearches.Should().Equal(1);
++        }
++
++        [Test]
++        public void should_search_anime_non_zero_seasons_before_season_zero()
++        {
++            var seasonSearches = new List<int>();
++
++            _series.SeriesType = SeriesTypes.Anime;
++            _series.Seasons = new List<Season>
++            {
++                new Season { SeasonNumber = 0, Monitored = true },
++                new Season { SeasonNumber = 1, Monitored = true },
++                new Season { SeasonNumber = 2, Monitored = true }
++            };
++
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySeason(_series.Id, It.IsAny<int>()))
++                .Returns<int, int>((seriesId, seasonNumber) => new List<Episode>
++                {
++                    Builder<Episode>.CreateNew()
++                        .With(e => e.Id = (seasonNumber * 10) + 1)
++                        .With(e => e.SeriesId = seriesId)
++                        .With(e => e.SeasonNumber = seasonNumber)
++                        .With(e => e.Monitored = true)
++                        .With(e => e.EpisodeFileId = 0)
++                        .With(e => e.AirDateUtc = System.DateTime.UtcNow.AddDays(-1))
++                        .Build()
++                });
++
++            Mocker.GetMock<ISearchForReleases>()
++                .Setup(s => s.SeasonSearch(_series.Id, It.IsAny<int>(), false, true, true, false, It.IsAny<HashSet<string>>(), It.IsAny<HashSet<int>>()))
++                .Returns(Task.FromResult(new List<DownloadDecision>()))
++                .Callback<int, int, bool, bool, bool, bool, HashSet<string>, HashSet<int>>((seriesId, seasonNumber, missingOnly, monitoredOnly, userInvokedSearch, interactiveSearch, broadQueries, coveredIds) => seasonSearches.Add(seasonNumber));
++
++            Subject.Execute(new SeriesSearchCommand { SeriesId = _series.Id, Trigger = CommandTrigger.Manual });
++
++            seasonSearches.Should().Equal(1, 2, 0);
++        }
++
++        [Test]
++        public void should_not_reorder_standard_series_seasons()
++        {
++            var seasonSearches = new List<int>();
++
++            _series.SeriesType = SeriesTypes.Standard;
++            _series.Seasons = new List<Season>
++            {
++                new Season { SeasonNumber = 0, Monitored = true },
++                new Season { SeasonNumber = 1, Monitored = true },
++                new Season { SeasonNumber = 2, Monitored = true }
++            };
++
++            Mocker.GetMock<ISearchForReleases>()
++                .Setup(s => s.SeasonSearch(_series.Id, It.IsAny<int>(), false, true, true, false))
++                .Returns(Task.FromResult(new List<DownloadDecision>()))
++                .Callback<int, int, bool, bool, bool, bool>((seriesId, seasonNumber, missingOnly, monitoredOnly, userInvokedSearch, interactiveSearch) => seasonSearches.Add(seasonNumber));
++
++            Subject.Execute(new SeriesSearchCommand { SeriesId = _series.Id, Trigger = CommandTrigger.Manual });
++
++            seasonSearches.Should().Equal(0, 1, 2);
++        }
++
++        [Test]
++        public void should_skip_season_zero_when_earlier_grab_covers_wanted_special()
++        {
++            var seasonSearches = new List<int>();
++            var season1Episode = Builder<Episode>.CreateNew()
++                .With(e => e.Id = 11)
++                .With(e => e.SeriesId = _series.Id)
++                .With(e => e.SeasonNumber = 1)
++                .With(e => e.Monitored = true)
++                .With(e => e.EpisodeFileId = 0)
++                .With(e => e.AirDateUtc = System.DateTime.UtcNow.AddDays(-1))
++                .Build();
++            var season0Special = Builder<Episode>.CreateNew()
++                .With(e => e.Id = 99)
++                .With(e => e.SeriesId = _series.Id)
++                .With(e => e.SeasonNumber = 0)
++                .With(e => e.Monitored = true)
++                .With(e => e.EpisodeFileId = 0)
++                .With(e => e.AirDateUtc = System.DateTime.UtcNow.AddDays(-1))
++                .Build();
++
++            _series.SeriesType = SeriesTypes.Anime;
++            _series.Seasons = new List<Season>
++            {
++                new Season { SeasonNumber = 0, Monitored = true },
++                new Season { SeasonNumber = 1, Monitored = true }
++            };
++
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySeason(_series.Id, 0))
++                .Returns(new List<Episode> { season0Special });
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySeason(_series.Id, 1))
++                .Returns(new List<Episode> { season1Episode });
++
++            Mocker.GetMock<ISearchForReleases>()
++                .Setup(s => s.SeasonSearch(_series.Id, It.IsAny<int>(), false, true, true, false, It.IsAny<HashSet<string>>(), It.IsAny<HashSet<int>>()))
++                .Returns(Task.FromResult(new List<DownloadDecision>()))
++                .Callback<int, int, bool, bool, bool, bool, HashSet<string>, HashSet<int>>((seriesId, seasonNumber, missingOnly, monitoredOnly, userInvokedSearch, interactiveSearch, broadQueries, coveredIds) => seasonSearches.Add(seasonNumber));
++
++            // The S01 grab covers both S01 episode and S00 special (S01+Specials pack)
++            var grabbedDecision = new DownloadDecision(new RemoteEpisode
++            {
++                Episodes = new List<Episode> { season1Episode, season0Special },
++                ParsedEpisodeInfo = new ParsedEpisodeInfo()
++            });
++
++            Mocker.GetMock<IProcessDownloadDecisions>()
++                .SetupSequence(s => s.ProcessDecisions(It.IsAny<List<DownloadDecision>>()))
++                .Returns(Task.FromResult(new ProcessedDecisions(new List<DownloadDecision> { grabbedDecision }, new List<DownloadDecision>(), new List<DownloadDecision>())));
++
++            Subject.Execute(new SeriesSearchCommand { SeriesId = _series.Id, Trigger = CommandTrigger.Manual });
++
++            // S01 is searched, S00 is skipped because the grab covered the special
++            seasonSearches.Should().Equal(1);
++        }
++
++        [Test]
++        public void should_not_skip_later_anime_season_on_partial_coverage()
++        {
++            var seasonSearches = new List<int>();
++            var season1Episode = Builder<Episode>.CreateNew()
++                .With(e => e.Id = 11)
++                .With(e => e.SeriesId = _series.Id)
++                .With(e => e.SeasonNumber = 1)
++                .With(e => e.Monitored = true)
++                .With(e => e.EpisodeFileId = 0)
++                .With(e => e.AirDateUtc = System.DateTime.UtcNow.AddDays(-1))
++                .Build();
++            var season2Episode1 = Builder<Episode>.CreateNew()
++                .With(e => e.Id = 21)
++                .With(e => e.SeriesId = _series.Id)
++                .With(e => e.SeasonNumber = 2)
++                .With(e => e.Monitored = true)
++                .With(e => e.EpisodeFileId = 0)
++                .With(e => e.AirDateUtc = System.DateTime.UtcNow.AddDays(-1))
++                .Build();
++            var season2Episode2 = Builder<Episode>.CreateNew()
++                .With(e => e.Id = 22)
++                .With(e => e.SeriesId = _series.Id)
++                .With(e => e.SeasonNumber = 2)
++                .With(e => e.Monitored = true)
++                .With(e => e.EpisodeFileId = 0)
++                .With(e => e.AirDateUtc = System.DateTime.UtcNow.AddDays(-1))
++                .Build();
++
++            _series.SeriesType = SeriesTypes.Anime;
++            _series.Seasons = new List<Season>
++            {
++                new Season { SeasonNumber = 1, Monitored = true },
++                new Season { SeasonNumber = 2, Monitored = true }
++            };
++
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySeason(_series.Id, 1))
++                .Returns(new List<Episode> { season1Episode });
++
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySeason(_series.Id, 2))
++                .Returns(new List<Episode> { season2Episode1, season2Episode2 });
++
++            Mocker.GetMock<ISearchForReleases>()
++                .Setup(s => s.SeasonSearch(_series.Id, It.IsAny<int>(), false, true, true, false, It.IsAny<HashSet<string>>(), It.IsAny<HashSet<int>>()))
++                .Returns(Task.FromResult(new List<DownloadDecision>()))
++                .Callback<int, int, bool, bool, bool, bool, HashSet<string>, HashSet<int>>((seriesId, seasonNumber, missingOnly, monitoredOnly, userInvokedSearch, interactiveSearch, broadQueries, coveredIds) => seasonSearches.Add(seasonNumber));
++
++            // S1 grab covers S1 episode and only ONE of the two S2 episodes (partial coverage)
++            var grabbedDecision = new DownloadDecision(new RemoteEpisode
++            {
++                Episodes = new List<Episode> { season1Episode, season2Episode1 },
++                ParsedEpisodeInfo = new ParsedEpisodeInfo()
++            });
++
++            Mocker.GetMock<IProcessDownloadDecisions>()
++                .SetupSequence(s => s.ProcessDecisions(It.IsAny<List<DownloadDecision>>()))
++                .Returns(Task.FromResult(new ProcessedDecisions(new List<DownloadDecision> { grabbedDecision }, new List<DownloadDecision>(), new List<DownloadDecision>())))
++                .Returns(Task.FromResult(new ProcessedDecisions(new List<DownloadDecision>(), new List<DownloadDecision>(), new List<DownloadDecision>())));
++
++            Subject.Execute(new SeriesSearchCommand { SeriesId = _series.Id, Trigger = CommandTrigger.Manual });
++
++            // S2 must still be searched because only 1 of 2 wanted episodes is covered
++            seasonSearches.Should().Equal(1, 2);
++        }
++
++        [Test]
++        public void should_pass_covered_episode_ids_to_later_season_search()
++        {
++            HashSet<int> capturedCoveredIds = null;
++            var season1Episode = Builder<Episode>.CreateNew()
++                .With(e => e.Id = 11)
++                .With(e => e.SeriesId = _series.Id)
++                .With(e => e.SeasonNumber = 1)
++                .With(e => e.Monitored = true)
++                .With(e => e.EpisodeFileId = 0)
++                .With(e => e.AirDateUtc = System.DateTime.UtcNow.AddDays(-1))
++                .Build();
++            var season2Episode1 = Builder<Episode>.CreateNew()
++                .With(e => e.Id = 21)
++                .With(e => e.SeriesId = _series.Id)
++                .With(e => e.SeasonNumber = 2)
++                .With(e => e.Monitored = true)
++                .With(e => e.EpisodeFileId = 0)
++                .With(e => e.AirDateUtc = System.DateTime.UtcNow.AddDays(-1))
++                .Build();
++            var season2Episode2 = Builder<Episode>.CreateNew()
++                .With(e => e.Id = 22)
++                .With(e => e.SeriesId = _series.Id)
++                .With(e => e.SeasonNumber = 2)
++                .With(e => e.Monitored = true)
++                .With(e => e.EpisodeFileId = 0)
++                .With(e => e.AirDateUtc = System.DateTime.UtcNow.AddDays(-1))
++                .Build();
++
++            _series.SeriesType = SeriesTypes.Anime;
++            _series.Seasons = new List<Season>
++            {
++                new Season { SeasonNumber = 1, Monitored = true },
++                new Season { SeasonNumber = 2, Monitored = true }
++            };
++
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySeason(_series.Id, 1))
++                .Returns(new List<Episode> { season1Episode });
++
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySeason(_series.Id, 2))
++                .Returns(new List<Episode> { season2Episode1, season2Episode2 });
++
++            Mocker.GetMock<ISearchForReleases>()
++                .Setup(s => s.SeasonSearch(_series.Id, It.IsAny<int>(), false, true, true, false, It.IsAny<HashSet<string>>(), It.IsAny<HashSet<int>>()))
++                .Returns(Task.FromResult(new List<DownloadDecision>()))
++                .Callback<int, int, bool, bool, bool, bool, HashSet<string>, HashSet<int>>((seriesId, seasonNumber, missingOnly, monitoredOnly, userInvokedSearch, interactiveSearch, broadQueries, coveredIds) =>
++                {
++                    if (seasonNumber == 2)
++                    {
++                        capturedCoveredIds = coveredIds != null ? new HashSet<int>(coveredIds) : null;
++                    }
++                });
++
++            // S1 grab covers S1 episode and one S2 episode
++            var grabbedDecision = new DownloadDecision(new RemoteEpisode
++            {
++                Episodes = new List<Episode> { season1Episode, season2Episode1 },
++                ParsedEpisodeInfo = new ParsedEpisodeInfo()
++            });
++
++            Mocker.GetMock<IProcessDownloadDecisions>()
++                .SetupSequence(s => s.ProcessDecisions(It.IsAny<List<DownloadDecision>>()))
++                .Returns(Task.FromResult(new ProcessedDecisions(new List<DownloadDecision> { grabbedDecision }, new List<DownloadDecision>(), new List<DownloadDecision>())))
++                .Returns(Task.FromResult(new ProcessedDecisions(new List<DownloadDecision>(), new List<DownloadDecision>(), new List<DownloadDecision>())));
++
++            Subject.Execute(new SeriesSearchCommand { SeriesId = _series.Id, Trigger = CommandTrigger.Manual });
++
++            // The covered IDs passed to S2 should contain both grabbed episode IDs
++            capturedCoveredIds.Should().NotBeNull();
++            capturedCoveredIds.Should().Contain(11);
++            capturedCoveredIds.Should().Contain(21);
++        }
++
++        [Test]
++        public void should_not_skip_or_reorder_standard_series_with_anime_skip_logic()
++        {
++            var seasonSearches = new List<int>();
++
++            _series.SeriesType = SeriesTypes.Standard;
++            _series.Seasons = new List<Season>
++            {
++                new Season { SeasonNumber = 0, Monitored = true },
++                new Season { SeasonNumber = 1, Monitored = true },
++                new Season { SeasonNumber = 2, Monitored = true }
++            };
++
++            Mocker.GetMock<ISearchForReleases>()
++                .Setup(s => s.SeasonSearch(_series.Id, It.IsAny<int>(), false, true, true, false))
++                .Returns(Task.FromResult(new List<DownloadDecision>()))
++                .Callback<int, int, bool, bool, bool, bool>((seriesId, seasonNumber, missingOnly, monitoredOnly, userInvokedSearch, interactiveSearch) => seasonSearches.Add(seasonNumber));
++
++            Subject.Execute(new SeriesSearchCommand { SeriesId = _series.Id, Trigger = CommandTrigger.Manual });
++
++            // Standard series: normal order, no skipping, no anime overload called
++            seasonSearches.Should().Equal(0, 1, 2);
++
++            // Verify the anime-specific overload with broadQueries is never called
++            Mocker.GetMock<ISearchForReleases>()
++                .Verify(s => s.SeasonSearch(_series.Id, It.IsAny<int>(), false, true, true, false, It.IsAny<HashSet<string>>(), It.IsAny<HashSet<int>>()), Times.Never());
++        }
+     }
+ }
+diff --git a/src/NzbDrone.Core.Test/IndexerTests/NewznabTests/NewznabRequestGeneratorFixture.cs b/src/NzbDrone.Core.Test/IndexerTests/NewznabTests/NewznabRequestGeneratorFixture.cs
+index b0fc4998b6b26e1cc27f4fd3923ab5c0869ec735..d225db496f1e8c999d4ed7a39e36ac0d4760c891 100644
+--- a/src/NzbDrone.Core.Test/IndexerTests/NewznabTests/NewznabRequestGeneratorFixture.cs
++++ b/src/NzbDrone.Core.Test/IndexerTests/NewznabTests/NewznabRequestGeneratorFixture.cs
+@@ -182,6 +182,78 @@ public void should_search_by_standard_season_number()
+             Subject.Settings.AnimeStandardFormatSearch = true;
+             var results = Subject.GetSearchRequests(_animeSeasonSearchCriteria);
+ 
++            results.GetTier(0).Should().HaveCount(3);
++            var pages = results.GetTier(0).Select(t => t.First()).ToList();
++
++            // Broad title-only query first
++            pages[0].Url.FullUri.Should().Contain("?t=search&");
++            pages[0].Url.FullUri.Should().Contain("q=Monkey%20Island");
++            pages[0].Url.FullUri.Should().NotContain("season=");
++
++            // Then season-specific queries
++            pages[1].Url.FullUri.Should().Contain("rid=10&season=3");
++            pages[2].Url.FullUri.Should().Contain("q=Monkey%20Island&season=3");
++        }
++
++        [Test]
++        public void should_emit_broad_query_for_anime_season_search_without_standard_format()
++        {
++            Subject.Settings.AnimeStandardFormatSearch = false;
++            var results = Subject.GetSearchRequests(_animeSeasonSearchCriteria);
++
++            results.GetTier(0).Should().HaveCount(1);
++
++            var page = results.GetTier(0).First().First();
++            page.Url.FullUri.Should().Contain("?t=search&");
++            page.Url.FullUri.Should().Contain("q=Monkey%20Island");
++            page.Url.FullUri.Should().NotContain("season=");
++        }
++
++        [Test]
++        public void should_use_anime_categories_for_anime_season_broad_query()
++        {
++            var results = Subject.GetSearchRequests(_animeSeasonSearchCriteria);
++
++            results.GetTier(0).Should().HaveCount(1);
++
++            var page = results.GetTier(0).First().First();
++            page.Url.FullUri.Should().Contain("&cat=3,4&");
++        }
++
++        [Test]
++        public void should_deduplicate_identical_scene_titles_for_anime_season_search()
++        {
++            Subject.Settings.AnimeStandardFormatSearch = true;
++            _animeSeasonSearchCriteria.SceneTitles = new List<string> { "Monkey Island", "Monkey Island", "Other Title" };
++
++            var results = Subject.GetSearchRequests(_animeSeasonSearchCriteria);
++
++            // 2 broad + 1 ID-based season + 2 title-based season = 5
++            var pages = results.GetTier(0).Select(t => t.First()).ToList();
++            pages.Should().HaveCount(5);
++
++            // Broad queries (deduplicated)
++            pages[0].Url.FullUri.Should().Contain("?t=search&");
++            pages[0].Url.FullUri.Should().Contain("q=Monkey%20Island");
++            pages[1].Url.FullUri.Should().Contain("?t=search&");
++            pages[1].Url.FullUri.Should().Contain("q=Other%20Title");
++
++            // Season-specific
++            pages[2].Url.FullUri.Should().Contain("rid=10&season=3");
++            pages[3].Url.FullUri.Should().Contain("q=Monkey%20Island&season=3");
++            pages[4].Url.FullUri.Should().Contain("q=Other%20Title&season=3");
++        }
++
++        [Test]
++        public void should_suppress_anime_season_broad_query_already_emitted()
++        {
++            Subject.Settings.AnimeStandardFormatSearch = true;
++
++            _animeSeasonSearchCriteria.BroadQueriesEmitted = new HashSet<string> { "Monkey Island" };
++
++            var results = Subject.GetSearchRequests(_animeSeasonSearchCriteria);
++
++            // Only season-specific queries remain (ID + title)
+             results.GetTier(0).Should().HaveCount(2);
+             var pages = results.GetTier(0).Select(t => t.First()).ToList();
+ 
+@@ -189,6 +261,103 @@ public void should_search_by_standard_season_number()
+             pages[1].Url.FullUri.Should().Contain("q=Monkey%20Island&season=3");
+         }
+ 
++        [Test]
++        public void should_emit_anime_season_broad_query_when_emitted_set_is_empty()
++        {
++            Subject.Settings.AnimeStandardFormatSearch = true;
++
++            _animeSeasonSearchCriteria.BroadQueriesEmitted = new HashSet<string>();
++
++            var results = Subject.GetSearchRequests(_animeSeasonSearchCriteria);
++
++            results.GetTier(0).Should().HaveCount(3);
++            var pages = results.GetTier(0).Select(t => t.First()).ToList();
++            pages[0].Url.FullUri.Should().Contain("q=Monkey%20Island");
++            pages[0].Url.FullUri.Should().NotContain("season=");
++        }
++
++        [Test]
++        public void should_emit_anime_season_broad_query_when_emitted_set_is_null()
++        {
++            Subject.Settings.AnimeStandardFormatSearch = true;
++            _animeSeasonSearchCriteria.BroadQueriesEmitted = null;
++
++            var results = Subject.GetSearchRequests(_animeSeasonSearchCriteria);
++
++            results.GetTier(0).Should().HaveCount(3);
++            var pages = results.GetTier(0).Select(t => t.First()).ToList();
++            pages[0].Url.FullUri.Should().Contain("q=Monkey%20Island");
++            pages[0].Url.FullUri.Should().NotContain("season=");
++        }
++
++        [Test]
++        public void should_not_mutate_shared_broad_query_state_for_anime_season_search()
++        {
++            Subject.Settings.AnimeStandardFormatSearch = true;
++
++            var broadEmitted = new HashSet<string> { "Other Title" };
++            _animeSeasonSearchCriteria.BroadQueriesEmitted = broadEmitted;
++
++            Subject.GetSearchRequests(_animeSeasonSearchCriteria);
++
++            broadEmitted.Should().BeEquivalentTo(new[] { "Other Title" });
++        }
++
++        [Test]
++        public void should_use_raw_titles_for_anime_season_broad_query_when_raw_engine()
++        {
++            _capabilities.TextSearchEngine = "raw";
++            _animeSeasonSearchCriteria.SceneTitles = new List<string> { "Edith & Little" };
++
++            var results = Subject.GetSearchRequests(_animeSeasonSearchCriteria);
++
++            // Raw engine uses AllSceneTitles (raw + clean variants)
++            var pages = results.GetTier(0).Select(t => t.First()).ToList();
++            pages.Should().HaveCountGreaterOrEqualTo(1);
++
++            // First broad query should use the raw title (& preserved as URL-encoded)
++            pages[0].Url.FullUri.Should().Contain("q=Edith%20%26%20Little");
++        }
++
++        [Test]
++        public void should_use_clean_titles_for_anime_season_broad_query_when_default_engine()
++        {
++            _animeSeasonSearchCriteria.SceneTitles = new List<string> { "Edith & Little" };
++
++            var results = Subject.GetSearchRequests(_animeSeasonSearchCriteria);
++
++            results.GetTier(0).Should().HaveCount(1);
++            var page = results.GetTier(0).First().First();
++
++            // Default engine replaces & with "and"
++            page.Url.FullUri.Should().Contain("q=Edith%20and%20Little");
++        }
++
++        [Test]
++        public void should_suppress_clean_broad_query_when_emitted_set_has_raw_title()
++        {
++            // Default engine uses clean titles, but suppression normalizes both ways
++            _animeSeasonSearchCriteria.SceneTitles = new List<string> { "Edith & Little" };
++            _animeSeasonSearchCriteria.BroadQueriesEmitted = new HashSet<string> { "Edith & Little" };
++
++            var results = Subject.GetSearchRequests(_animeSeasonSearchCriteria);
++
++            // Broad query should be suppressed via clean-title normalization
++            results.GetTier(0).Should().HaveCount(0);
++        }
++
++        [Test]
++        public void should_suppress_anime_season_broad_query_for_title_with_parens()
++        {
++            _animeSeasonSearchCriteria.SceneTitles = new List<string> { "Title (2020)" };
++            _animeSeasonSearchCriteria.BroadQueriesEmitted = new HashSet<string> { "Title (2020)" };
++
++            var results = Subject.GetSearchRequests(_animeSeasonSearchCriteria);
++
++            // Parens are normalized away by GetCleanSceneTitle, suppression matches
++            results.GetTier(0).Should().HaveCount(0);
++        }
++
+         [Test]
+         public void should_not_search_by_rid_if_not_supported()
+         {
+diff --git a/src/NzbDrone.Core.Test/IndexerTests/NyaaTests/NyaaRequestGeneratorFixture.cs b/src/NzbDrone.Core.Test/IndexerTests/NyaaTests/NyaaRequestGeneratorFixture.cs
+index 5ac2bffc38195b8bce150f7a42a5ed29320f7f53..cf6adb3c608970cd586ec8f67ae46588d7d7a371 100644
+--- a/src/NzbDrone.Core.Test/IndexerTests/NyaaTests/NyaaRequestGeneratorFixture.cs
++++ b/src/NzbDrone.Core.Test/IndexerTests/NyaaTests/NyaaRequestGeneratorFixture.cs
+@@ -5,6 +5,7 @@
+ using NzbDrone.Core.Indexers.Nyaa;
+ using NzbDrone.Core.IndexerSearch.Definitions;
+ using NzbDrone.Core.Test.Framework;
++using NzbDrone.Core.Tv;
+ 
+ namespace NzbDrone.Core.Test.IndexerTests.NyaaTests
+ {
+@@ -96,11 +97,220 @@ public void should_search_by_standard_season_number()
+             Subject.Settings.AnimeStandardFormatSearch = true;
+             var results = Subject.GetSearchRequests(_animeSeasonSearchCriteria);
+ 
+-            results.GetAllTiers().Should().HaveCount(1);
++            results.GetTier(0).Should().HaveCount(2);
+ 
+-            var page = results.GetAllTiers().First().First();
++            var pages = results.GetTier(0).Select(t => t.First()).ToList();
++
++            pages[0].Url.FullUri.Should().Contain("term=Naruto+Shippuuden");
++            pages[0].Url.FullUri.Should().NotContain("+s03");
++            pages[1].Url.FullUri.Should().Contain("term=Naruto+Shippuuden+s03");
++        }
++
++        [Test]
++        public void should_search_broad_title_only_when_standard_format_disabled()
++        {
++            Subject.Settings.AnimeStandardFormatSearch = false;
++            var results = Subject.GetSearchRequests(_animeSeasonSearchCriteria);
++
++            results.GetTier(0).Should().HaveCount(1);
++
++            var page = results.GetTier(0).First().First();
++
++            page.Url.FullUri.Should().Contain("term=Naruto+Shippuuden");
++            page.Url.FullUri.Should().NotContain("+s");
++        }
++
++        [Test]
++        public void should_emit_broad_query_per_scene_title()
++        {
++            _animeSeasonSearchCriteria.SceneTitles = new List<string> { "Title One", "Title Two" };
++
++            var results = Subject.GetSearchRequests(_animeSeasonSearchCriteria);
++
++            results.GetTier(0).Should().HaveCount(2);
++
++            var pages = results.GetTier(0).Select(t => t.First()).ToList();
++
++            pages[0].Url.FullUri.Should().Contain("term=Title+One");
++            pages[1].Url.FullUri.Should().Contain("term=Title+Two");
++        }
++
++        [Test]
++        public void should_emit_broad_and_standard_queries_per_scene_title()
++        {
++            Subject.Settings.AnimeStandardFormatSearch = true;
++            _animeSeasonSearchCriteria.SceneTitles = new List<string> { "Title One", "Title Two" };
++
++            var results = Subject.GetSearchRequests(_animeSeasonSearchCriteria);
++
++            results.GetTier(0).Should().HaveCount(4);
+ 
++            var pages = results.GetTier(0).Select(t => t.First()).ToList();
++
++            pages[0].Url.FullUri.Should().Contain("term=Title+One");
++            pages[0].Url.FullUri.Should().NotContain("+s");
++            pages[1].Url.FullUri.Should().Contain("term=Title+One+s03");
++            pages[2].Url.FullUri.Should().Contain("term=Title+Two");
++            pages[2].Url.FullUri.Should().NotContain("+s");
++            pages[3].Url.FullUri.Should().Contain("term=Title+Two+s03");
++        }
++
++        [Test]
++        public void should_deduplicate_identical_scene_titles()
++        {
++            Subject.Settings.AnimeStandardFormatSearch = true;
++            _animeSeasonSearchCriteria.SceneTitles = new List<string> { "Naruto Shippuuden", "Naruto Shippuuden", "Other Title" };
++
++            var results = Subject.GetSearchRequests(_animeSeasonSearchCriteria);
++
++            results.GetTier(0).Should().HaveCount(4);
++
++            var pages = results.GetTier(0).Select(t => t.First()).ToList();
++
++            pages[0].Url.FullUri.Should().Contain("term=Naruto+Shippuuden");
++            pages[0].Url.FullUri.Should().NotContain("+s");
++            pages[1].Url.FullUri.Should().Contain("term=Naruto+Shippuuden+s03");
++            pages[2].Url.FullUri.Should().Contain("term=Other+Title");
++            pages[2].Url.FullUri.Should().NotContain("+s");
++            pages[3].Url.FullUri.Should().Contain("term=Other+Title+s03");
++        }
++
++        [Test]
++        public void should_suppress_broad_query_already_emitted_in_series_search()
++        {
++            Subject.Settings.AnimeStandardFormatSearch = true;
++
++            var broadEmitted = new HashSet<string> { "Naruto Shippuuden" };
++
++            _animeSeasonSearchCriteria.BroadQueriesEmitted = broadEmitted;
++
++            var results = Subject.GetSearchRequests(_animeSeasonSearchCriteria);
++
++            // Should only have the season-specific query, not the broad title-only one
++            results.GetTier(0).Should().HaveCount(1);
++
++            var page = results.GetTier(0).First().First();
+             page.Url.FullUri.Should().Contain("term=Naruto+Shippuuden+s03");
+         }
++
++        [Test]
++        public void should_emit_broad_query_when_not_yet_in_emitted_set()
++        {
++            Subject.Settings.AnimeStandardFormatSearch = true;
++
++            var broadEmitted = new HashSet<string>();
++            _animeSeasonSearchCriteria.BroadQueriesEmitted = broadEmitted;
++
++            var results = Subject.GetSearchRequests(_animeSeasonSearchCriteria);
++
++            // Should have both broad and season-specific queries
++            results.GetTier(0).Should().HaveCount(2);
++            broadEmitted.Should().BeEmpty();
++        }
++
++        [Test]
++        public void should_still_emit_broad_query_when_no_emitted_set_provided()
++        {
++            Subject.Settings.AnimeStandardFormatSearch = true;
++            _animeSeasonSearchCriteria.BroadQueriesEmitted = null;
++
++            var results = Subject.GetSearchRequests(_animeSeasonSearchCriteria);
++
++            results.GetTier(0).Should().HaveCount(2);
++
++            var pages = results.GetTier(0).Select(t => t.First()).ToList();
++            pages[0].Url.FullUri.Should().Contain("term=Naruto+Shippuuden");
++            pages[0].Url.FullUri.Should().NotContain("+s");
++        }
++
++        [Test]
++        public void should_not_mutate_shared_broad_query_state()
++        {
++            Subject.Settings.AnimeStandardFormatSearch = true;
++
++            var broadEmitted = new HashSet<string> { "Other Title" };
++            _animeSeasonSearchCriteria.BroadQueriesEmitted = broadEmitted;
++
++            Subject.GetSearchRequests(_animeSeasonSearchCriteria);
++
++            broadEmitted.Should().BeEquivalentTo(new[] { "Other Title" });
++        }
++
++        [Test]
++        public void should_emit_s00e01_for_single_episode_search_with_season_0()
++        {
++            Subject.Settings.AnimeStandardFormatSearch = true;
++
++            var criteria = new SingleEpisodeSearchCriteria
++            {
++                SceneTitles = new List<string> { "Grimgar" },
++                SeasonNumber = 0,
++                EpisodeNumber = 1
++            };
++
++            var results = Subject.GetSearchRequests(criteria);
++
++            results.GetTier(0).Should().HaveCount(1);
++
++            var page = results.GetTier(0).First().First();
++            page.Url.FullUri.Should().Contain("term=Grimgar+s00e01");
++        }
++
++        [Test]
++        public void should_not_emit_s00e01_when_standard_format_search_disabled()
++        {
++            Subject.Settings.AnimeStandardFormatSearch = false;
++
++            var criteria = new SingleEpisodeSearchCriteria
++            {
++                SceneTitles = new List<string> { "Grimgar" },
++                SeasonNumber = 0,
++                EpisodeNumber = 1
++            };
++
++            var results = Subject.GetSearchRequests(criteria);
++
++            results.GetAllTiers().Should().HaveCount(0);
++        }
++
++        [Test]
++        public void should_emit_anime_special_alias_queries_for_anime_series()
++        {
++            var criteria = new SpecialEpisodeSearchCriteria
++            {
++                Series = new Series { SeriesType = SeriesTypes.Anime },
++                SceneTitles = new List<string> { "Grimgar" },
++                EpisodeQueryTitles = new[] { "Grimgar OVA 2.5" }
++            };
++
++            var results = Subject.GetSearchRequests(criteria);
++            var pages = results.GetAllTiers().Select(t => t.First()).ToList();
++
++            // 1 episode-title query + 4 alias queries (ova, oav, special, specials)
++            pages.Should().HaveCount(5);
++            pages[0].Url.FullUri.Should().Contain("term=Grimgar+OVA+2.5");
++            pages[1].Url.FullUri.Should().Contain("term=Grimgar+ova");
++            pages[2].Url.FullUri.Should().Contain("term=Grimgar+oav");
++            pages[3].Url.FullUri.Should().Contain("term=Grimgar+special");
++            pages[4].Url.FullUri.Should().Contain("term=Grimgar+specials");
++        }
++
++        [Test]
++        public void should_not_emit_anime_special_alias_queries_for_non_anime_series()
++        {
++            var criteria = new SpecialEpisodeSearchCriteria
++            {
++                Series = new Series { SeriesType = SeriesTypes.Standard },
++                SceneTitles = new List<string> { "Some Show" },
++                EpisodeQueryTitles = new[] { "Some Show Special Episode" }
++            };
++
++            var results = Subject.GetSearchRequests(criteria);
++            var pages = results.GetAllTiers().Select(t => t.First()).ToList();
++
++            // Only the episode-title query, no alias queries
++            pages.Should().HaveCount(1);
++            pages[0].Url.FullUri.Should().Contain("term=Some+Show+Special+Episode");
++        }
+     }
+ }
+diff --git a/src/NzbDrone.Core.Test/ParserTests/AbsoluteEpisodeNumberParserFixture.cs b/src/NzbDrone.Core.Test/ParserTests/AbsoluteEpisodeNumberParserFixture.cs
+index 13fd2f60dd07c0e9093b1ffd8f1f739c80df8c7b..3e30c5740cec68d1754bf04b9106f4a210bff73e 100644
+--- a/src/NzbDrone.Core.Test/ParserTests/AbsoluteEpisodeNumberParserFixture.cs
++++ b/src/NzbDrone.Core.Test/ParserTests/AbsoluteEpisodeNumberParserFixture.cs
+@@ -40,6 +40,8 @@ public class AbsoluteEpisodeNumberParserFixture : CoreTest
+         [TestCase("[DeadFish] Series Title - 09v2 [720p][AAC]", "Series Title", 9, 0, 0)]
+         [TestCase("[Underwater-FFF] Series Title - 01 (720p) [27AAA0A0]", "Series Title", 1, 0, 0)]
+         [TestCase("[S-T-D] Series Title! - 06 (1280x720 10bit AAC) [59B3F2EA].mkv", "Series Title!", 6, 0, 0)]
++        [TestCase("[S-T-D] Series Title! - 06 (1280x720 10 bit AAC) [59B3F2EA].mkv", "Series Title!", 6, 0, 0)]
++        [TestCase("[HorribleSubs] Series Title - 09 [720p 8 bits] [ABCDEF12]", "Series Title", 9, 0, 0)]
+         [TestCase("Series Title - 010 (720p) [27AAA0A0].mkv", "Series Title", 10, 0, 0)]
+         [TestCase("Initial_Series_Title - 01 DVD - Central Anime", "Initial Series Title", 1, 0, 0)]
+         [TestCase("Initial_Series_Title_-_01(DVD)_-_(Central_Anime)[5AF6F1E4].mkv", "Initial Series Title", 1, 0, 0)]
+@@ -167,6 +169,7 @@ public void should_parse_absolute_specials(string postTitle, string title, int a
+             result.Special.Should().BeTrue();
+         }
+ 
++        [TestCase("[Arigatou] El Cazador de la Bruja 1-26 [x264.AAC].mkv", "El Cazador de la Bruja", 1, 26)]
+         [TestCase("[ANBU-AonE]_SeriesTitle_26-27_[F224EF26].avi", "SeriesTitle", 26, 27)]
+         [TestCase("[Doutei] Some Good, Anime Show - 01-12 [BD][720p-AAC]", "Some Good, Anime Show", 1, 12)]
+         [TestCase("Series Title (2010) - 01-02-03 - Episode Title (1) HDTV-720p", "Series Title (2010)", 1, 3)]
+@@ -202,6 +205,7 @@ public void should_parse_multi_episode_absolute_numbers(string postTitle, string
+         [TestCase("Anime, Title? | Japanse Anime, Title? [Season 1 + EXTRA] [BD 1080p x265 HEVC OPUS] [Dual-Audio]", "Anime, Title | Japanse Anime, Title", 1)]
+         [TestCase("[Judas] Japanse Anime, Title (Anime, Title?) (Season 1) [1080p][HEVC x265 10bit][Multi-Subs] (Batch)", "Japanse Anime, Title (Anime, Title)", 1)]
+         [TestCase("[Judas] Japanse Anime, Title (Anime, Title?) (Season 1) [1080p][HEVC x265 10bit][Multi-Subs] (Batch)", "Japanse Anime, Title (Anime, Title)", 1)]
++        [TestCase("[EMBER] Grimgar: Ashes and Illusions (2016) (Season 1) [BDRip] [1080p Dual Audio HEVC 10 bits] (Hai to Gensou no Grimgar)", "Grimgar: Ashes and Illusions (2016)", 1)]
+         public void should_parse_anime_season_packs(string postTitle, string title, int seasonNumber)
+         {
+             var result = Parser.Parser.ParseTitle(postTitle);
+diff --git a/src/NzbDrone.Core.Test/ParserTests/ParsingServiceTests/GetEpisodesFixture.cs b/src/NzbDrone.Core.Test/ParserTests/ParsingServiceTests/GetEpisodesFixture.cs
+index 9a5610838043a2bc5c1f4b9707e25e6f82c50533..d32f2e16a7ce667d7b0049b1fa997ea6d2ffe32d 100644
+--- a/src/NzbDrone.Core.Test/ParserTests/ParsingServiceTests/GetEpisodesFixture.cs
++++ b/src/NzbDrone.Core.Test/ParserTests/ParsingServiceTests/GetEpisodesFixture.cs
+@@ -521,6 +521,174 @@ public void should_fallback_to_lookup_full_season_by_season_number_if_series_use
+                 .Verify(v => v.GetEpisodesBySceneSeason(It.IsAny<int>(), It.IsAny<int>()), Times.Once);
+         }
+ 
++        [Test]
++        public void should_lookup_anime_multi_season_by_scene_season_number_if_series_uses_scene_numbering()
++        {
++            GivenSceneNumberingSeries();
++            GivenFullSeason();
++            _series.SeriesType = SeriesTypes.Anime;
++            _parsedEpisodeInfo.IsMultiSeason = true;
++            _parsedEpisodeInfo.SeasonNumbers = new[] { 1, 2 };
++
++            var season1Episodes = new List<Episode>
++            {
++                Builder<Episode>.CreateNew()
++                    .With(e => e.Id = 101)
++                    .With(e => e.SeasonNumber = 1)
++                    .Build()
++            };
++            var season2Episodes = new List<Episode>
++            {
++                Builder<Episode>.CreateNew()
++                    .With(e => e.Id = 202)
++                    .With(e => e.SeasonNumber = 2)
++                    .Build()
++            };
++
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySceneSeason(_series.Id, 1))
++                .Returns(season1Episodes);
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySceneSeason(_series.Id, 2))
++                .Returns(season2Episodes);
++
++            var result = Subject.GetEpisodes(_parsedEpisodeInfo, _series, true, null);
++
++            result.Select(e => e.Id).Should().BeEquivalentTo(new[] { 101, 202 });
++            Mocker.GetMock<IEpisodeService>()
++                .Verify(v => v.GetEpisodesBySceneSeason(_series.Id, 1), Times.Once);
++            Mocker.GetMock<IEpisodeService>()
++                .Verify(v => v.GetEpisodesBySceneSeason(_series.Id, 2), Times.Once);
++            Mocker.GetMock<IEpisodeService>()
++                .Verify(v => v.GetEpisodesBySeason(It.IsAny<int>(), It.IsAny<int>()), Times.Never);
++        }
++
++        [Test]
++        public void should_fallback_to_tvdb_season_for_anime_multi_season_when_scene_lookup_is_empty()
++        {
++            GivenSceneNumberingSeries();
++            GivenFullSeason();
++            _series.SeriesType = SeriesTypes.Anime;
++            _parsedEpisodeInfo.IsMultiSeason = true;
++            _parsedEpisodeInfo.SeasonNumbers = new[] { 1, 2 };
++
++            var season2Episodes = new List<Episode>
++            {
++                Builder<Episode>.CreateNew()
++                    .With(e => e.Id = 202)
++                    .With(e => e.SeasonNumber = 2)
++                    .Build()
++            };
++
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySceneSeason(_series.Id, 1))
++                .Returns(new List<Episode>());
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySceneSeason(_series.Id, 2))
++                .Returns(season2Episodes);
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySeason(_series.Id, 1))
++                .Returns(new List<Episode>
++                {
++                    Builder<Episode>.CreateNew()
++                        .With(e => e.Id = 101)
++                        .With(e => e.SeasonNumber = 1)
++                        .Build()
++                });
++
++            var result = Subject.GetEpisodes(_parsedEpisodeInfo, _series, true, null);
++
++            result.Select(e => e.Id).Should().BeEquivalentTo(new[] { 101, 202 });
++            Mocker.GetMock<IEpisodeService>()
++                .Verify(v => v.GetEpisodesBySeason(_series.Id, 1), Times.Once);
++        }
++
++        [Test]
++        public void should_return_episodes_for_anime_multi_season_pack_with_specials_metadata()
++        {
++            _series.SeriesType = SeriesTypes.Anime;
++
++            // Simulates a parsed anime multi-season pack whose trailing metadata
++            // contains "Specials" (e.g. [Anime Time] SAO (S01+S02+S03+S04+Movies+Specials+OVAs)).
++            // With the parser fix, FullSeason stays true and Special stays false.
++            _parsedEpisodeInfo.FullSeason = true;
++            _parsedEpisodeInfo.IsMultiSeason = true;
++            _parsedEpisodeInfo.Special = false;
++            _parsedEpisodeInfo.SeasonNumber = 1;
++            _parsedEpisodeInfo.SeasonNumbers = new[] { 1, 2 };
++            _parsedEpisodeInfo.EpisodeNumbers = Array.Empty<int>();
++
++            var season1Episodes = new List<Episode>
++            {
++                Builder<Episode>.CreateNew()
++                    .With(e => e.Id = 101)
++                    .With(e => e.SeasonNumber = 1)
++                    .Build()
++            };
++            var season2Episodes = new List<Episode>
++            {
++                Builder<Episode>.CreateNew()
++                    .With(e => e.Id = 202)
++                    .With(e => e.SeasonNumber = 2)
++                    .Build()
++            };
++
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySeason(_series.Id, 1))
++                .Returns(season1Episodes);
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySeason(_series.Id, 2))
++                .Returns(season2Episodes);
++
++            var result = Subject.GetEpisodes(_parsedEpisodeInfo, _series, false, null);
++
++            result.Should().HaveCount(2);
++            result.Select(e => e.Id).Should().BeEquivalentTo(new[] { 101, 202 });
++        }
++
++        [Test]
++        public void should_map_real_anime_multi_season_title_with_specials_metadata()
++        {
++            _series.SeriesType = SeriesTypes.Anime;
++
++            var parsedEpisodeInfo = Parser.Parser.ParseTitle("[Anime Time] Sword Art Online (S01+S02+S03+S04+Movies+Specials+OVAs) [BD][1080p][HEVC 10bit x265][AAC][Eng Sub]");
++
++            parsedEpisodeInfo.Should().NotBeNull();
++            parsedEpisodeInfo.FullSeason.Should().BeTrue();
++            parsedEpisodeInfo.Special.Should().BeFalse();
++            parsedEpisodeInfo.IsMultiSeason.Should().BeTrue();
++            parsedEpisodeInfo.SeasonNumbers.Should().BeEquivalentTo(new[] { 1, 2, 3, 4 });
++
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySeason(_series.Id, 1))
++                .Returns(new List<Episode>
++                {
++                    Builder<Episode>.CreateNew().With(e => e.Id = 101).With(e => e.SeasonNumber = 1).Build()
++                });
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySeason(_series.Id, 2))
++                .Returns(new List<Episode>
++                {
++                    Builder<Episode>.CreateNew().With(e => e.Id = 202).With(e => e.SeasonNumber = 2).Build()
++                });
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySeason(_series.Id, 3))
++                .Returns(new List<Episode>
++                {
++                    Builder<Episode>.CreateNew().With(e => e.Id = 303).With(e => e.SeasonNumber = 3).Build()
++                });
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySeason(_series.Id, 4))
++                .Returns(new List<Episode>
++                {
++                    Builder<Episode>.CreateNew().With(e => e.Id = 404).With(e => e.SeasonNumber = 4).Build()
++                });
++
++            var remoteEpisode = Subject.Map(parsedEpisodeInfo, _series);
++
++            remoteEpisode.Episodes.Select(e => e.Id).Should().BeEquivalentTo(new[] { 101, 202, 303, 404 });
++        }
++
+         [Test]
+         public void should_use_season_zero_when_looking_up_is_partial_special_episode_found_by_title()
+         {
+@@ -560,5 +728,195 @@ public void should_use_original_parse_result_when_special_episode_lookup_by_titl
+             Mocker.GetMock<IEpisodeService>()
+                   .Verify(v => v.FindEpisode(_series.TvdbId, _parsedEpisodeInfo.SeasonNumber, _parsedEpisodeInfo.EpisodeNumbers.First()), Times.Once());
+         }
++
++        [Test]
++        public void should_cocover_single_wanted_season0_special_for_anime_pack_with_special_keyword()
++        {
++            _series.SeriesType = SeriesTypes.Anime;
++            _parsedEpisodeInfo.FullSeason = true;
++            _parsedEpisodeInfo.EpisodeNumbers = Array.Empty<int>();
++            _parsedEpisodeInfo.SeasonNumber = 1;
++            _parsedEpisodeInfo.ReleaseTitle = "[SubGroup] Grimgar S01+Specials [1080p]";
++
++            var season1Episodes = new List<Episode>
++            {
++                Builder<Episode>.CreateNew()
++                    .With(e => e.Id = 101)
++                    .With(e => e.SeasonNumber = 1)
++                    .Build()
++            };
++
++            var season0Special = Builder<Episode>.CreateNew()
++                .With(e => e.Id = 901)
++                .With(e => e.SeasonNumber = 0)
++                .With(e => e.Monitored = true)
++                .With(e => e.EpisodeFileId = 0)
++                .With(e => e.AirDateUtc = DateTime.UtcNow.AddDays(-30))
++                .Build();
++
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySeason(_series.Id, 1))
++                .Returns(season1Episodes);
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySeason(_series.Id, 0))
++                .Returns(new List<Episode> { season0Special });
++
++            var result = Subject.GetEpisodes(_parsedEpisodeInfo, _series, false, null);
++
++            result.Should().HaveCount(2);
++            result.Select(e => e.Id).Should().BeEquivalentTo(new[] { 101, 901 });
++        }
++
++        [TestCase("[SubGroup] Grimgar S01+OVA [1080p]")]
++        [TestCase("[SubGroup] Grimgar S01+OAV [1080p]")]
++        [TestCase("[SubGroup] Grimgar S01+Special [1080p]")]
++        [TestCase("[Trix] Grimgar: Ashes and Illusions S01+OVA (Batch) [BDRip 1080p AV1 Opus] (Dual Audio, Multi Subs, VOSTFR) | Hai to Gensou no Grimgar 灰と幻想のグリムガル Season S1 OAV Specials")]
++        public void should_cocover_single_wanted_season0_special_for_anime_pack_with_ova_keyword(string releaseTitle)
++        {
++            _series.SeriesType = SeriesTypes.Anime;
++            _parsedEpisodeInfo.FullSeason = true;
++            _parsedEpisodeInfo.EpisodeNumbers = Array.Empty<int>();
++            _parsedEpisodeInfo.SeasonNumber = 1;
++            _parsedEpisodeInfo.ReleaseTitle = releaseTitle;
++
++            var season1Episodes = new List<Episode>
++            {
++                Builder<Episode>.CreateNew()
++                    .With(e => e.Id = 101)
++                    .With(e => e.SeasonNumber = 1)
++                    .Build()
++            };
++
++            var season0Special = Builder<Episode>.CreateNew()
++                .With(e => e.Id = 901)
++                .With(e => e.SeasonNumber = 0)
++                .With(e => e.Monitored = true)
++                .With(e => e.EpisodeFileId = 0)
++                .With(e => e.AirDateUtc = DateTime.UtcNow.AddDays(-30))
++                .Build();
++
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySeason(_series.Id, 1))
++                .Returns(season1Episodes);
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySeason(_series.Id, 0))
++                .Returns(new List<Episode> { season0Special });
++
++            var result = Subject.GetEpisodes(_parsedEpisodeInfo, _series, false, null);
++
++            result.Should().HaveCount(2);
++            result.Select(e => e.Id).Should().BeEquivalentTo(new[] { 101, 901 });
++        }
++
++        [Test]
++        public void should_not_cocover_season0_when_multiple_wanted_specials()
++        {
++            _series.SeriesType = SeriesTypes.Anime;
++            _parsedEpisodeInfo.FullSeason = true;
++            _parsedEpisodeInfo.EpisodeNumbers = Array.Empty<int>();
++            _parsedEpisodeInfo.SeasonNumber = 1;
++            _parsedEpisodeInfo.ReleaseTitle = "[SubGroup] Grimgar S01+Specials [1080p]";
++
++            var season1Episodes = new List<Episode>
++            {
++                Builder<Episode>.CreateNew()
++                    .With(e => e.Id = 101)
++                    .With(e => e.SeasonNumber = 1)
++                    .Build()
++            };
++
++            var season0Specials = new List<Episode>
++            {
++                Builder<Episode>.CreateNew()
++                    .With(e => e.Id = 901)
++                    .With(e => e.SeasonNumber = 0)
++                    .With(e => e.Monitored = true)
++                    .With(e => e.EpisodeFileId = 0)
++                    .With(e => e.AirDateUtc = DateTime.UtcNow.AddDays(-30))
++                    .Build(),
++                Builder<Episode>.CreateNew()
++                    .With(e => e.Id = 902)
++                    .With(e => e.SeasonNumber = 0)
++                    .With(e => e.Monitored = true)
++                    .With(e => e.EpisodeFileId = 0)
++                    .With(e => e.AirDateUtc = DateTime.UtcNow.AddDays(-20))
++                    .Build()
++            };
++
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySeason(_series.Id, 1))
++                .Returns(season1Episodes);
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySeason(_series.Id, 0))
++                .Returns(season0Specials);
++
++            var result = Subject.GetEpisodes(_parsedEpisodeInfo, _series, false, null);
++
++            result.Should().HaveCount(1);
++            result.Select(e => e.Id).Should().BeEquivalentTo(new[] { 101 });
++        }
++
++        [TestCase("[SubGroup] Grimgar S01+Extras [1080p]")]
++        [TestCase("[SubGroup] Grimgar S01+NCOP [1080p]")]
++        [TestCase("[SubGroup] Grimgar S01+NCED [1080p]")]
++        [TestCase("[SubGroup] Grimgar S01+Menu [1080p]")]
++        [TestCase("[SubGroup] Grimgar S01+Bonus [1080p]")]
++        public void should_not_cocover_season0_when_title_has_non_episode_markers(string releaseTitle)
++        {
++            _series.SeriesType = SeriesTypes.Anime;
++            _parsedEpisodeInfo.FullSeason = true;
++            _parsedEpisodeInfo.EpisodeNumbers = Array.Empty<int>();
++            _parsedEpisodeInfo.SeasonNumber = 1;
++            _parsedEpisodeInfo.ReleaseTitle = releaseTitle;
++
++            var season1Episodes = new List<Episode>
++            {
++                Builder<Episode>.CreateNew()
++                    .With(e => e.Id = 101)
++                    .With(e => e.SeasonNumber = 1)
++                    .Build()
++            };
++
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySeason(_series.Id, 1))
++                .Returns(season1Episodes);
++
++            var result = Subject.GetEpisodes(_parsedEpisodeInfo, _series, false, null);
++
++            result.Should().HaveCount(1);
++            result.Select(e => e.Id).Should().BeEquivalentTo(new[] { 101 });
++
++            // Should NOT query season 0 episodes at all
++            Mocker.GetMock<IEpisodeService>()
++                .Verify(v => v.GetEpisodesBySeason(_series.Id, 0), Times.Never);
++        }
++
++        [Test]
++        public void should_not_cocover_season0_for_standard_series()
++        {
++            _series.SeriesType = SeriesTypes.Standard;
++            _parsedEpisodeInfo.FullSeason = true;
++            _parsedEpisodeInfo.EpisodeNumbers = Array.Empty<int>();
++            _parsedEpisodeInfo.SeasonNumber = 1;
++            _parsedEpisodeInfo.ReleaseTitle = "Series Title S01+Specials 1080p";
++
++            var season1Episodes = new List<Episode>
++            {
++                Builder<Episode>.CreateNew()
++                    .With(e => e.Id = 101)
++                    .With(e => e.SeasonNumber = 1)
++                    .Build()
++            };
++
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySeason(_series.Id, 1))
++                .Returns(season1Episodes);
++
++            var result = Subject.GetEpisodes(_parsedEpisodeInfo, _series, false, null);
++
++            result.Should().HaveCount(1);
++            Mocker.GetMock<IEpisodeService>()
++                .Verify(v => v.GetEpisodesBySeason(_series.Id, 0), Times.Never);
++        }
+     }
+ }
+diff --git a/src/NzbDrone.Core.Test/ParserTests/SeasonParserFixture.cs b/src/NzbDrone.Core.Test/ParserTests/SeasonParserFixture.cs
+old mode 100644
+new mode 100755
+index f7838bebfac522b359e5e6de8f59ce746fd4407a..fc9a3b12354ac60c39d455bab16344e51ffcc983
+--- a/src/NzbDrone.Core.Test/ParserTests/SeasonParserFixture.cs
++++ b/src/NzbDrone.Core.Test/ParserTests/SeasonParserFixture.cs
+@@ -1,3 +1,4 @@
++using System.Linq;
+ using FluentAssertions;
+ using NUnit.Framework;
+ using NzbDrone.Core.Test.Framework;
+@@ -37,6 +38,7 @@ public class SeasonParserFixture : CoreTest
+         [TestCase("[HorribleRips] Mobile Series 00 S1 [1080p]", "Mobile Series 00", 1)]
+         [TestCase("[Zoombie] Series 100: Bucket List S01 [Web][MKV][h265 10-bit][1080p][AC3 2.0][Softsubs (Zoombie)]", "Series 100: Bucket List", 1)]
+         [TestCase("Seriesless (2016/S01/WEB-DL/1080p/AC3 5.1/DUAL/SUB)", "Seriesless (2016)", 1)]
++        [TestCase("Series Title S01 (1080p BluRay x265 HEVC 10 bits AAC 5.1 Tigole)", "Series Title", 1)]
+         public void should_parse_full_season_release(string postTitle, string title, int season)
+         {
+             var result = Parser.Parser.ParseTitle(postTitle);
+@@ -112,6 +114,114 @@ public void should_parse_multi_season_release(string postTitle, string title, in
+             result.IsMultiSeason.Should().BeTrue();
+         }
+ 
++        [TestCase("[SubGroup] Sword Art Online S01-S04 1080p BluRay x264", "Sword Art Online", 1, new[] { 1, 2, 3, 4 })]
++        [TestCase("[SubGroup] Sword Art Online S01-S02 1080p BluRay", "Sword Art Online", 1, new[] { 1, 2 })]
++        [TestCase("[Reaktor] Attack on Titan S01-S03 BD 1080p", "Attack on Titan", 1, new[] { 1, 2, 3 })]
++        public void should_parse_anime_multi_season_range(string postTitle, string title, int firstSeason, int[] expectedSeasons)
++        {
++            var result = Parser.Parser.ParseTitle(postTitle);
++            result.SeriesTitle.Should().Be(title);
++            result.SeasonNumber.Should().Be(firstSeason);
++            result.FullSeason.Should().BeTrue();
++            result.IsMultiSeason.Should().BeTrue();
++            result.SeasonNumbers.Should().BeEquivalentTo(expectedSeasons);
++        }
++
++        [TestCase("[SubGroup] Sword Art Online S01+S02+S03+S04 1080p BluRay", "Sword Art Online", 1, new[] { 1, 2, 3, 4 })]
++        [TestCase("[SubGroup] Title S01+S03 1080p", "Title", 1, new[] { 1, 3 })]
++        [TestCase("[Tenrai-Sensei] Sword Art Online S1+S2+S3+S4+The Movie+OVAs", "Sword Art Online", 1, new[] { 1, 2, 3, 4 })]
++        [TestCase("[Anime Time] Sword Art Online (S01+S02+S03+S04+...)", "Sword Art Online", 1, new[] { 1, 2, 3, 4 })]
++        [TestCase("[Kosaka] Sword Art Online (S01+S02+S03+S04+...)", "Sword Art Online", 1, new[] { 1, 2, 3, 4 })]
++        public void should_parse_anime_multi_season_list(string postTitle, string title, int firstSeason, int[] expectedSeasons)
++        {
++            var result = Parser.Parser.ParseTitle(postTitle);
++            result.SeriesTitle.Should().Be(title);
++            result.SeasonNumber.Should().Be(firstSeason);
++            result.FullSeason.Should().BeTrue();
++            result.IsMultiSeason.Should().BeTrue();
++            result.SeasonNumbers.Should().BeEquivalentTo(expectedSeasons);
++        }
++
++        [TestCase("[Anime Time] Sword Art Online (S01+S02+S03+S04+Movies+Specials+OVAs) [BD][1080p][HEVC 10bit x265][AAC][Eng Sub]", "Sword Art Online", 1, new[] { 1, 2, 3, 4 })]
++        [TestCase("[Kosaka] Sword Art Online (S01+S02+S03+S04+Movies+Specials+OVAs) [BD 1080p HEVC x265 10bit][Dual Audio][Multi Subs]", "Sword Art Online", 1, new[] { 1, 2, 3, 4 })]
++        [TestCase("[Tenrai-Sensei] Sword Art Online S1+S2+S3+S4+The Movie+OVAs [BD 1080p]", "Sword Art Online", 1, new[] { 1, 2, 3, 4 })]
++        [TestCase("[AceAres] Sword Art Online S01+S02+S03+S04 + Movie + Special [BD 1080p HEVC x265]", "Sword Art Online", 1, new[] { 1, 2, 3, 4 })]
++        public void should_parse_anime_multi_season_with_specials_metadata(string postTitle, string title, int firstSeason, int[] expectedSeasons)
++        {
++            var result = Parser.Parser.ParseTitle(postTitle);
++            result.Should().NotBeNull();
++            result.SeriesTitle.Should().Be(title);
++            result.SeasonNumber.Should().Be(firstSeason);
++            result.IsMultiSeason.Should().BeTrue();
++            result.FullSeason.Should().BeTrue();
++            result.Special.Should().BeFalse();
++            result.SeasonNumbers.Should().BeEquivalentTo(expectedSeasons);
++        }
++
++        [TestCase("[SubGroup] Sword Art Online S01 1080p BluRay x264")]
++        [TestCase("[HorribleRips] Mobile Suit Gundam 00 S1 [1080p]")]
++        public void should_not_parse_anime_single_season_as_multi(string postTitle)
++        {
++            var result = Parser.Parser.ParseTitle(postTitle);
++            result.Should().NotBeNull();
++            result.FullSeason.Should().BeTrue();
++            result.IsMultiSeason.Should().BeFalse();
++        }
++
++        [TestCase("Series Title S03 Specials DVDRip XviD RUNNER", "Series Title", 3)]
++        [TestCase("Series Title S05 Special 720p HDTV", "Series Title", 5)]
++        public void should_downgrade_single_season_special_to_special(string postTitle, string title, int season)
++        {
++            var result = Parser.Parser.ParseTitle(postTitle);
++            result.Should().NotBeNull();
++            result.SeriesTitle.Should().Be(title);
++            result.SeasonNumber.Should().Be(season);
++            result.FullSeason.Should().BeFalse();
++            result.Special.Should().BeTrue();
++            result.IsMultiSeason.Should().BeFalse();
++        }
++
++        [TestCase("[SubGroup] Title S01+S02+")]
++        [TestCase("[SubGroup] Title S01+S02+Sx")]
++        [TestCase("[SubGroup] Title S01+S02+1")]
++        public void should_not_parse_malformed_anime_multi_season_tail(string postTitle)
++        {
++            var result = Parser.Parser.ParseTitle(postTitle);
++
++            // May parse as single-season via another regex, or fail entirely;
++            // either way it must not be detected as a multi-season pack
++            if (result != null)
++            {
++                result.IsMultiSeason.Should().BeFalse();
++            }
++        }
++
++        [Test]
++        public void should_populate_season_numbers_for_standard_multi_season()
++        {
++            var result = Parser.Parser.ParseTitle("Series.Title.S01-S09.1080p.AMZN.WEB-DL.DDP2.0.H.264-NTb");
++            result.IsMultiSeason.Should().BeTrue();
++            result.SeasonNumbers.Should().BeEquivalentTo(Enumerable.Range(1, 9));
++        }
++
++        [TestCase("[SubGroup] Grimgar S01+Specials [1080p]", "Grimgar", 1)]
++        [TestCase("[SubGroup] Grimgar S01+Special [1080p]", "Grimgar", 1)]
++        [TestCase("[SubGroup] Grimgar S01+OVA [1080p]", "Grimgar", 1)]
++        [TestCase("[SubGroup] Grimgar S01+OAV [1080p]", "Grimgar", 1)]
++        [TestCase("[SubGroup] Grimgar S01 + OVA [1080p]", "Grimgar", 1)]
++        [TestCase("[SubGroup] Grimgar S01 + Specials [1080p]", "Grimgar", 1)]
++        [TestCase("[Trix] Grimgar: Ashes and Illusions S01+OVA (Batch) [BDRip 1080p AV1 Opus] (Dual Audio, Multi Subs, VOSTFR) | Hai to Gensou no Grimgar 灰と幻想のグリムガル Season S1 OAV Specials", "Grimgar: Ashes and Illusions", 1)]
++        public void should_parse_anime_season_plus_specials_as_full_season(string postTitle, string title, int season)
++        {
++            var result = Parser.Parser.ParseTitle(postTitle);
++            result.Should().NotBeNull();
++            result.SeriesTitle.Should().Be(title);
++            result.SeasonNumber.Should().Be(season);
++            result.FullSeason.Should().BeTrue();
++            result.Special.Should().BeFalse();
++            result.IsMultiSeason.Should().BeFalse();
++        }
++
+         [Test]
+         public void should_not_parse_season_folders()
+         {
+diff --git a/src/NzbDrone.Core.Test/ParserTests/SingleEpisodeParserFixture.cs b/src/NzbDrone.Core.Test/ParserTests/SingleEpisodeParserFixture.cs
+index 14d0afef11c28dc2f2e6006dad23f56a15f71d33..87e926107495e8fee5f03878aa1b8392be77b400 100644
+--- a/src/NzbDrone.Core.Test/ParserTests/SingleEpisodeParserFixture.cs
++++ b/src/NzbDrone.Core.Test/ParserTests/SingleEpisodeParserFixture.cs
+@@ -178,6 +178,8 @@ public class SingleEpisodeParserFixture : CoreTest
+         [TestCase("Amazing Title (2024/S01E07/DSNP/WEB-DL/1080p/ESP/EAC3 5.1/ING/EAC3 5.1 Atmos/SUBS) SPWEB", "Amazing Title (2024)", 1, 7)]
+         [TestCase("Mini Title (Miniserie) (2024/S01E07/DSNP/WEB-DL/1080p/ESP/EAC3 5.1/ING/EAC3 5.1 Atmos/SUBS) SPWEB", "Mini Title (2024)", 1, 7)]
+ 
++        [TestCase("8 Bit Show S01E05 720p HDTV x264-DIMENSION", "8 Bit Show", 1, 5)]
++
+         // [TestCase("", "", 0, 0)]
+         public void should_parse_single_episode(string postTitle, string title, int seasonNumber, int episodeNumber)
+         {
+diff --git a/src/NzbDrone.Core.Test/Sonarr.Core.Test.csproj b/src/NzbDrone.Core.Test/Sonarr.Core.Test.csproj
+index 6a1477da42addf48d29c827fa2bba613042f382b..4d510b27e716051c2f91fe887d77cfe3c5aa8bb5 100644
+--- a/src/NzbDrone.Core.Test/Sonarr.Core.Test.csproj
++++ b/src/NzbDrone.Core.Test/Sonarr.Core.Test.csproj
+@@ -4,7 +4,6 @@
+   </PropertyGroup>
+   <ItemGroup>
+     <PackageReference Include="Dapper" Version="2.0.123" />
+-    <PackageReference Include="GitHubActionsTestLogger" Version="2.3.3" />
+     <PackageReference Include="NBuilder" Version="6.1.0" />
+     <PackageReference Include="System.Data.SQLite.Core.Servarr" Version="1.0.115.5-18" />
+   </ItemGroup>
+diff --git a/src/NzbDrone.Host.Test/Sonarr.Host.Test.csproj b/src/NzbDrone.Host.Test/Sonarr.Host.Test.csproj
+index 00783be18b005f6db75f305fe7e3fe58cd7f436c..e92dc5c401f99b9795150a6df3c39dc7f2f1d08f 100644
+--- a/src/NzbDrone.Host.Test/Sonarr.Host.Test.csproj
++++ b/src/NzbDrone.Host.Test/Sonarr.Host.Test.csproj
+@@ -3,7 +3,6 @@
+     <TargetFrameworks>net6.0</TargetFrameworks>
+   </PropertyGroup>
+   <ItemGroup>
+-    <PackageReference Include="GitHubActionsTestLogger" Version="2.3.3" />
+   </ItemGroup>
+   <ItemGroup>
+     <ProjectReference Include="..\NzbDrone.Host\Sonarr.Host.csproj" />
+diff --git a/src/NzbDrone.Integration.Test/Sonarr.Integration.Test.csproj b/src/NzbDrone.Integration.Test/Sonarr.Integration.Test.csproj
+index b782538804ff46887b8f9445a2f1197c389102c9..79c5960972f844e0d47dd44295324bc17dae9b61 100644
+--- a/src/NzbDrone.Integration.Test/Sonarr.Integration.Test.csproj
++++ b/src/NzbDrone.Integration.Test/Sonarr.Integration.Test.csproj
+@@ -4,7 +4,6 @@
+     <OutputType>Library</OutputType>
+   </PropertyGroup>
+   <ItemGroup>
+-    <PackageReference Include="GitHubActionsTestLogger" Version="2.3.3" />
+     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="6.0.21" />
+   </ItemGroup>
+   <ItemGroup>
+diff --git a/src/NzbDrone.Libraries.Test/Sonarr.Libraries.Test.csproj b/src/NzbDrone.Libraries.Test/Sonarr.Libraries.Test.csproj
+index 511c54cba40593f9f2404e663f2320ef94b8da58..ca02b5e9d51109b5b84041019753d60a19543173 100644
+--- a/src/NzbDrone.Libraries.Test/Sonarr.Libraries.Test.csproj
++++ b/src/NzbDrone.Libraries.Test/Sonarr.Libraries.Test.csproj
+@@ -3,7 +3,6 @@
+     <TargetFrameworks>net6.0</TargetFrameworks>
+   </PropertyGroup>
+   <ItemGroup>
+-    <PackageReference Include="GitHubActionsTestLogger" Version="2.3.3" />
+   </ItemGroup>
+   <ItemGroup>
+     <ProjectReference Include="..\NzbDrone.Test.Common\Sonarr.Test.Common.csproj" />
+diff --git a/src/NzbDrone.Mono.Test/Sonarr.Mono.Test.csproj b/src/NzbDrone.Mono.Test/Sonarr.Mono.Test.csproj
+index 60c6f901cd9a795d8c2572857cf0b602679be8a1..2660db2e4834606458cb1c25e96e02ece2102b9b 100644
+--- a/src/NzbDrone.Mono.Test/Sonarr.Mono.Test.csproj
++++ b/src/NzbDrone.Mono.Test/Sonarr.Mono.Test.csproj
+@@ -7,7 +7,6 @@
+        See https://github.com/xamarin/XamarinComponents/issues/282
+   -->
+   <ItemGroup>
+-    <PackageReference Include="GitHubActionsTestLogger" Version="2.3.3" />
+     <PackageReference Include="Mono.Posix.NETStandard" Version="5.20.1.34-servarr24" />
+   </ItemGroup>
+   <ItemGroup>
+diff --git a/src/NzbDrone.Test.Common/NzbDroneRunner.cs b/src/NzbDrone.Test.Common/NzbDroneRunner.cs
+index 25f977fce10a74ec466ee0f8a098d77772af6ee7..11f20a88ffd8d6ac68a8f7b2e187e8cca492f5d0 100644
+--- a/src/NzbDrone.Test.Common/NzbDroneRunner.cs
++++ b/src/NzbDrone.Test.Common/NzbDroneRunner.cs
+@@ -177,6 +177,7 @@ private void GenerateConfigFile(bool enableAuth)
+                 new XElement(ConfigFileProvider.CONFIG_ELEMENT_NAME,
+                              new XElement(nameof(ConfigFileProvider.ApiKey), apiKey),
+                              new XElement(nameof(ConfigFileProvider.LogLevel), "trace"),
++                             new XElement(nameof(ConfigFileProvider.ConsoleLogLevel), "off"),
+                              new XElement(nameof(ConfigFileProvider.AnalyticsEnabled), false),
+                              new XElement(nameof(ConfigFileProvider.AuthenticationMethod), enableAuth ? "Forms" : "None"),
+                              new XElement(nameof(ConfigFileProvider.AuthenticationRequired), "DisabledForLocalAddresses"),
+diff --git a/src/NzbDrone.Update.Test/Sonarr.Update.Test.csproj b/src/NzbDrone.Update.Test/Sonarr.Update.Test.csproj
+index 5b4d7dfd789fd0a1f8e3a9af9022429537e93f56..6210493aaaeeeeec357f539102eabcad1721c627 100644
+--- a/src/NzbDrone.Update.Test/Sonarr.Update.Test.csproj
++++ b/src/NzbDrone.Update.Test/Sonarr.Update.Test.csproj
+@@ -3,7 +3,6 @@
+     <TargetFrameworks>net6.0</TargetFrameworks>
+   </PropertyGroup>
+   <ItemGroup>
+-    <PackageReference Include="GitHubActionsTestLogger" Version="2.3.3" />
+   </ItemGroup>
+   <ItemGroup>
+     <ProjectReference Include="..\NzbDrone.Test.Common\Sonarr.Test.Common.csproj" />
+diff --git a/src/NzbDrone.Windows.Test/Sonarr.Windows.Test.csproj b/src/NzbDrone.Windows.Test/Sonarr.Windows.Test.csproj
+index 15bcf5d5123e4898926e628829ed186b4f1015f6..f674f3712c1e613e1b2a3c5f3ecd6c62a771018d 100644
+--- a/src/NzbDrone.Windows.Test/Sonarr.Windows.Test.csproj
++++ b/src/NzbDrone.Windows.Test/Sonarr.Windows.Test.csproj
+@@ -3,7 +3,6 @@
+     <TargetFrameworks>net6.0</TargetFrameworks>
+   </PropertyGroup>
+   <ItemGroup>
+-    <PackageReference Include="GitHubActionsTestLogger" Version="2.3.3" />
+   </ItemGroup>
+   <ItemGroup>
+     <ProjectReference Include="..\NzbDrone.Common.Test\Sonarr.Common.Test.csproj" />

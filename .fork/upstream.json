@@ -1,0 +1,9 @@
+{
+  "upstream_repository": "https://github.com/Sonarr/Sonarr.git",
+  "upstream_ref_type": "tag",
+  "upstream_ref": "v4.0.17.2952",
+  "upstream_commit": "97e85a908d4fd37c0652dd38f462cd6ddd1fa2f6",
+  "upstream_version": "4.0.17.2952",
+  "fork_ref": "8e94309dc8a4b788b08a8e3fc697c12a864ea432",
+  "patch_directory": ".fork/patches"
+}

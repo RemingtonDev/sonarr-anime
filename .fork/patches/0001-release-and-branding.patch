@@ -1,0 +1,2383 @@
+diff --git a/.dockerignore b/.dockerignore
+new file mode 100644
+index 0000000000000000000000000000000000000000..a61dd7b86a6a7a3f37c5eeeefae65c2f2577e4a9
+--- /dev/null
++++ b/.dockerignore
+@@ -0,0 +1,43 @@
++# Local testing
++local-test/
++scripts/
++
++# Build artifacts (keep Sonarr/ — needed by local Dockerfile)
++_output*/
++_artifacts/
++_tests*/
++_publish*/
++_temp*/
++_rawPackage/
++docker-context/
++TestResults/
++
++# Git and IDE
++.git/
++.github/
++.vs/
++.idea/
++.claude/
++
++# Logs and databases
++*.log
++*.trace*.txt
++*.debug*.txt
++*.db
++*.db-shm
++*.db-wal
++
++# Source (not needed in runtime image)
++src/
++frontend/
++node_modules/
++
++# Packages
++Sonarr_*/
++*.zip
++*.gz
++
++# Docs
++*.md
++docs/
++LICENSE
+diff --git a/.github/ISSUE_TEMPLATE/bug_report.yml b/.github/ISSUE_TEMPLATE/bug_report.yml
+index 4e4eedb66440356afbfb4e387e01f7c1a2f1f3d7..c54296cb4faef5963c1b4f6393c90a9f815e93c9 100644
+--- a/.github/ISSUE_TEMPLATE/bug_report.yml
++++ b/.github/ISSUE_TEMPLATE/bug_report.yml
+@@ -1,81 +1,103 @@
+ name: Bug Report
+-description: 'Only bug reports for v4 will be accepted, older versions are no longer receiving bug fixes and support issues will be closed immediately.'
+-labels: ['needs-triage']
++description: Report an anime search bug in sonarr-anime
++labels: ['bug']
+ body:
+ - type: checkboxes
+   attributes:
+-    label: Is there an existing issue for this?
+-    description: Please search to see if an open or closed issue already exists for the bug you encountered. If a bug exists and it is closed as complete it may not yet be in a stable release.
++    label: Pre-flight checks
+     options:
+-    - label: I have searched the existing open and closed issues
++    - label: I have searched existing open and closed issues
+       required: true
+-- type: textarea
++    - label: This bug is specific to sonarr-anime (not upstream Sonarr behavior)
++      required: true
++- type: input
+   attributes:
+-    label: Current Behavior
+-    description: A concise description of what you're experiencing.
++    label: Fork version
++    description: "sonarr-anime version (e.g. 4.0.17.812) — check System > Status in the UI"
++    placeholder: "4.0.17.812"
+   validations:
+     required: true
+-- type: textarea
++- type: dropdown
++  attributes:
++    label: Install type
++    options:
++      - GHCR Docker image
++      - Release archive
++      - Local build
++  validations:
++    required: true
++- type: dropdown
++  attributes:
++    label: Indexer path
++    description: How does Sonarr reach the indexer?
++    options:
++      - Native Nyaa (built-in indexer)
++      - Prowlarr / Torznab
++      - Prowlarr / Newznab
++      - Other
++  validations:
++    required: true
++- type: dropdown
+   attributes:
+-    label: Expected Behavior
+-    description: A concise description of what you expected to happen.
++    label: Public or private indexer?
++    options:
++      - Public (e.g. Nyaa, AnimeTosho)
++      - Private
++  validations:
++    required: true
++- type: input
++  attributes:
++    label: Series and seasons searched
++    description: "e.g. Sword Art Online S01-S04"
++    placeholder: "Series Name S01"
+   validations:
+     required: true
+ - type: textarea
+   attributes:
+-    label: Steps To Reproduce
+-    description: Steps to reproduce the behavior.
+-    placeholder: |
+-      1. In this environment...
+-      2. With this config...
+-      3. Run '...'
+-      4. See error...
++    label: Expected cascade behavior
++    description: What did you expect the search cascade to do? (e.g. pack search should have covered all episodes)
+   validations:
+-    required: false
++    required: true
+ - type: textarea
+   attributes:
+-    label: Environment
+-    description: |
+-      examples:
+-        - **OS**: Ubuntu 22.04
+-        - **Sonarr**: Sonarr 4.0.0.766
+-        - **Docker Install**: Yes
+-        - **Using Reverse Proxy**: No
+-        - **Browser**: Firefox 90 (If UI related)
+-        - **Database**: Sqlite 3.41.2
+-    value: |
+-        - OS: 
+-        - Sonarr: 
+-        - Docker Install: 
+-        - Using Reverse Proxy: 
+-        - Browser: 
+-        - Database: 
+-    render: markdown
++    label: Actual behavior
++    description: What actually happened?
+   validations:
+     required: true
+ - type: dropdown
+   attributes:
+-    label: What branch are you running?
++    label: Did per-episode fallback occur?
++    description: Check trace logs for individual episode queries after the pack/season search
+     options:
+-      - Main
+-      - Develop
+-      - Other (This issue will be closed)
++      - "Yes"
++      - "No"
++      - "Not sure"
+   validations:
+     required: true
+ - type: textarea
+   attributes:
+-    label: Trace Logs?
++    label: Trace logs
+     description: |
+-      Trace Logs (https://wiki.servarr.com/sonarr/troubleshooting#logging-and-log-files) 
+-      ***Generally speaking, all bug reports must have trace logs provided.***
+-      *** Info Logs are not trace logs. If the logs do not say trace and are not from a file like `*.trace.*.txt` they are not trace logs.***
++      Attach trace logs (Settings > General > Log Level: Trace). Look for files like `sonarr.trace.*.txt` in your config/logs directory.
++      **Info logs are not trace logs.** Without trace logs, most search bugs cannot be diagnosed.
++    placeholder: "Paste trace log excerpts or attach the file"
+   validations:
+     required: true
+ - type: textarea
+   attributes:
+-    label: Anything else?
++    label: E2E test output (if reproducible)
+     description: |
+-      Links? Screenshots? References? Anything that will give us more context about the issue you are encountering!
+-      Tip: You can attach images or log files by clicking this area to highlight it and then dragging files in.
++      If you can reproduce locally, run `/test-e2e` or `/test-e2e-prowlarr` and paste the report summary.
++  validations:
++    required: false
++- type: textarea
++  attributes:
++    label: Environment
++    description: OS, Docker version, reverse proxy, etc.
++    value: |
++        - OS:
++        - Docker:
++        - Reverse proxy:
++    render: markdown
+   validations:
+     required: false
+diff --git a/.github/ISSUE_TEMPLATE/config.yml b/.github/ISSUE_TEMPLATE/config.yml
+index 2fb2fa0a193f1401831c6fa29dbf9020eaaac265..11db9b0ccb893ae4f9f808206b1e67f0bf7599ae 100644
+--- a/.github/ISSUE_TEMPLATE/config.yml
++++ b/.github/ISSUE_TEMPLATE/config.yml
+@@ -1,14 +1,8 @@
+ blank_issues_enabled: false
+ contact_links:
+-  - name: Support via Discord
+-    url: https://discord.gg/M6BvZn5
+-    about: Chat with users and devs on support and setup related topics.
+-  - name: Support via Reddit
+-    url: https://reddit.com/r/Sonarr
+-    about: Discuss and search through support topics.
+-  - name: Support via Forums
+-    url: https://forums.sonarr.tv/
+-    about: Discuss and search through support topics.
+-  - name: Support via IRC
+-    url: https://web.libera.chat/?channels=#sonarr
+-    about: Chat with users and devs on support and setup related topics.
+\ No newline at end of file
++  - name: General Sonarr support
++    url: https://wiki.servarr.com/sonarr
++    about: For help with Sonarr features unrelated to this fork's anime search changes, use the upstream Sonarr wiki, forums, or Discord.
++  - name: Upstream Sonarr issues
++    url: https://github.com/Sonarr/Sonarr/issues
++    about: For bugs in Sonarr behavior that are not specific to this fork's anime search patches.
+diff --git a/.github/ISSUE_TEMPLATE/feature_request.yml b/.github/ISSUE_TEMPLATE/feature_request.yml
+index cd224373c95726784e218a03d94130f34b76c7a3..bcb4030d93b159a6c82bce0cf20df243838088bd 100644
+--- a/.github/ISSUE_TEMPLATE/feature_request.yml
++++ b/.github/ISSUE_TEMPLATE/feature_request.yml
+@@ -1,37 +1,35 @@
+ name: Feature Request
+-description: 'Suggest an idea for Sonarr'
+-labels: ['needs-triage']
++description: Suggest an improvement to the anime search pipeline
++labels: ['enhancement']
+ body:
++- type: markdown
++  attributes:
++    value: |
++      This fork has a narrow scope: reducing redundant anime search queries on Sonarr v4.
++      Feature requests outside this scope are better directed to [upstream Sonarr](https://github.com/Sonarr/Sonarr).
+ - type: checkboxes
+   attributes:
+-    label: Is there an existing issue for this?
+-    description: Please search to see if an open or closed issue already exists for the feature you are requesting. If a feature request exists and it is closed as complete it may not yet be in a stable release.
++    label: Scope check
+     options:
+-    - label: I have searched the existing open and closed issues
++    - label: This request is related to anime search efficiency, indexer compatibility, or fork infrastructure
++      required: true
++    - label: I have searched existing open and closed issues
+       required: true
+ - type: textarea
+   attributes:
+-    label: Is your feature request related to a problem? Please describe
+-    description: A clear and concise description of what the problem is.
+-  validations:
+-    required: true
+-- type: textarea
+-  attributes:
+-    label: Describe the solution you'd like
+-    description: A clear and concise description of what you want to happen.
++    label: Problem
++    description: What anime search problem does this address?
+   validations:
+     required: true
+ - type: textarea
+   attributes:
+-    label: Describe alternatives you've considered
+-    description: A clear and concise description of any alternative solutions or features you've considered.
++    label: Proposed solution
++    description: How should the fork handle this?
+   validations:
+     required: true
+ - type: textarea
+   attributes:
+-    label: Anything else?
+-    description: |
+-      Links? References? Mockups? Anything that will give us more context about the feature you are encountering!
+-      Tip: You can attach images or log files by clicking this area to highlight it and then dragging files in.
++    label: Alternatives considered
++    description: Other approaches you've thought about, or why upstream Sonarr doesn't solve this.
+   validations:
+     required: false
+diff --git a/.github/ISSUE_TEMPLATE/indexer_compatibility.yml b/.github/ISSUE_TEMPLATE/indexer_compatibility.yml
+new file mode 100644
+index 0000000000000000000000000000000000000000..ac730ee05bc9e0b99ca3b29ce282d1e0ccbee689
+--- /dev/null
++++ b/.github/ISSUE_TEMPLATE/indexer_compatibility.yml
+@@ -0,0 +1,86 @@
++name: Indexer Compatibility Report
++description: Report how an indexer behaves with the anime search cascade
++labels: ['indexer-compat']
++body:
++- type: markdown
++  attributes:
++    value: |
++      This form collects compatibility data for indexers beyond the tested baseline (native Nyaa).
++      Both success and failure reports are useful.
++- type: input
++  attributes:
++    label: Indexer name and type
++    description: "e.g. Nyaa (Torznab), AnimeTosho (Newznab), AniDex (Torznab)"
++    placeholder: "Indexer Name (protocol)"
++  validations:
++    required: true
++- type: dropdown
++  attributes:
++    label: Connection path
++    options:
++      - Native / built-in indexer
++      - Prowlarr / Torznab
++      - Prowlarr / Newznab
++      - Other
++  validations:
++    required: true
++- type: dropdown
++  attributes:
++    label: Public or private?
++    options:
++      - Public
++      - Private
++  validations:
++    required: true
++- type: input
++  attributes:
++    label: Fork version
++    placeholder: "4.0.17.812"
++  validations:
++    required: true
++- type: textarea
++  attributes:
++    label: Sample release titles
++    description: Paste a few release titles that worked or failed to match. This helps diagnose parser issues.
++    placeholder: |
++      Worked: [SubGroup] Series Name S01-S04 [1080p]
++      Failed: [SubGroup] Series.Name.Complete.BluRay.1080p
++  validations:
++    required: true
++- type: dropdown
++  attributes:
++    label: Did broad-first (pack) search happen?
++    description: In trace logs, was a broad title-only query sent before season-specific queries?
++    options:
++      - "Yes"
++      - "No"
++      - "Not sure"
++  validations:
++    required: true
++- type: dropdown
++  attributes:
++    label: Was pack coverage recognized?
++    description: Did the cascade skip per-episode queries after finding a pack release?
++    options:
++      - "Yes"
++      - "No"
++      - "Partially (some seasons skipped)"
++      - "Not sure"
++  validations:
++    required: true
++- type: dropdown
++  attributes:
++    label: Does behavior differ from native Nyaa baseline?
++    options:
++      - "Yes — worse (more queries, missed packs)"
++      - "Yes — different but acceptable"
++      - "No — same behavior"
++      - "Not sure / haven't compared"
++  validations:
++    required: true
++- type: textarea
++  attributes:
++    label: Additional context
++    description: Trace log excerpts, e2e test output, or any other details.
++  validations:
++    required: false
+diff --git a/.github/actions/archive/action.yml b/.github/actions/archive/action.yml
+index 83e8a8ea9eb8740dcbf66a3f9916f44cea9a092d..bfaee9f7961baf8d8fdb65a027256b7cbf30e013 100644
+--- a/.github/actions/archive/action.yml
++++ b/.github/actions/archive/action.yml
+@@ -25,5 +25,5 @@ runs:
+   using: 'composite'
+   steps:
+     - name: Archive Artifact
+-      uses: thedoctor0/zip-release@0.7.5
++      uses: thedoctor0/zip-release@7fddfdd07cadb5b8c6c0dbcdcec17f8cd7784b80 # 0.7.5
+       
+diff --git a/.github/actions/package/action.yml b/.github/actions/package/action.yml
+index 99c4d4ff1ac7ed0414ed348118bd5aa550beb7be..1e3b2641aeb723231bdff66ae82357643944ee73 100644
+--- a/.github/actions/package/action.yml
++++ b/.github/actions/package/action.yml
+@@ -17,21 +17,24 @@ inputs:
+   major_version:
+     description: 'Sonarr major version'
+     required: true
+-  version:
+-    description: 'Sonarr version'
++  app_version:
++    description: 'Sonarr app version'
++    required: true
++  release_version:
++    description: 'Sonarr fork release version'
+     required: true
+ 
+ runs:
+   using: 'composite'
+   steps:
+     - name: Download Artifact
+-      uses: actions/download-artifact@v4
++      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+       with:
+         name: ${{ inputs.artifact }}
+         path: _output
+-        
++
+     - name: Download UI Artifact
+-      uses: actions/download-artifact@v4
++      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+       with:
+         name: build_ui
+         path: _output/UI
+@@ -42,7 +45,8 @@ runs:
+         echo "FRAMEWORK=${{ inputs.framework }}" >> "$GITHUB_ENV"
+         echo "BRANCH=${{ inputs.branch }}" >> "$GITHUB_ENV"
+         echo "SONARR_MAJOR_VERSION=${{ inputs.major_version }}" >> "$GITHUB_ENV"
+-        echo "SONARR_VERSION=${{ inputs.version }}" >> "$GITHUB_ENV"
++        echo "APP_VERSION=${{ inputs.app_version }}" >> "$GITHUB_ENV"
++        echo "RELEASE_VERSION=${{ inputs.release_version }}" >> "$GITHUB_ENV"
+ 
+     - name: Create Packages
+       shell: bash
+@@ -67,11 +71,12 @@ runs:
+         build.bat
+ 
+     - name: Upload Artifact
+-      uses: actions/upload-artifact@v4
++      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+       with:
+         name: release_${{ inputs.platform }}
+         compression-level: 0
+         if-no-files-found: error
++        retention-days: 7
+         path: |
+           _artifacts/*.exe
+           _artifacts/*.tar.gz
+diff --git a/.github/actions/package/package.sh b/.github/actions/package/package.sh
+index 8dce605853393e4b9befd243bc2f3fcd6485abb9..258a4dffa12b14e5bb65404e9d5d33b3f53b852e 100755
+--- a/.github/actions/package/package.sh
++++ b/.github/actions/package/package.sh
+@@ -4,6 +4,7 @@ outputFolder=_output
+ artifactsFolder=_artifacts
+ uiFolder="$outputFolder/UI"
+ framework="${FRAMEWORK:=net6.0}"
++releaseVersion="${RELEASE_VERSION:-${APP_VERSION}}"
+ 
+ rm -rf $artifactsFolder
+ mkdir $artifactsFolder
+@@ -13,7 +14,7 @@ do
+   name="${runtime##*/}"
+   folderName="$runtime/$framework"
+   sonarrFolder="$folderName/Sonarr"
+-  archiveName="Sonarr.$BRANCH.$SONARR_VERSION.$name"
++  archiveName="Sonarr.$BRANCH.$releaseVersion.$name"
+ 
+   if [[ "$name" == 'UI' ]]; then
+     continue
+diff --git a/.github/actions/publish-test-artifact/action.yml b/.github/actions/publish-test-artifact/action.yml
+index af3642043018578d6731c62fa4e549578173272f..a9d57f8982ccfa3799c5f13c93eb15a08657f21b 100644
+--- a/.github/actions/publish-test-artifact/action.yml
++++ b/.github/actions/publish-test-artifact/action.yml
+@@ -12,7 +12,8 @@ inputs:
+ runs:
+   using: 'composite'
+   steps:
+-    - uses: actions/upload-artifact@v4
++    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+       with:
+         name: tests-${{ inputs.runtime }}
+         path: _tests/${{ inputs.framework }}/${{ inputs.runtime }}/publish/**/*
++        retention-days: 7
+diff --git a/.github/actions/test/action.yml b/.github/actions/test/action.yml
+index bd62f483054d9a09c4ca218e07c001baa3c72920..5b53e38027f7fdbedbd3916f774ef24d828a561f 100644
+--- a/.github/actions/test/action.yml
++++ b/.github/actions/test/action.yml
+@@ -27,11 +27,13 @@ runs:
+   using: 'composite'
+   steps:
+     - name: Setup .NET
+-      uses: actions/setup-dotnet@v4
++      uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
++      with:
++        dotnet-version: 6.0.428
+ 
+     - name: Setup Postgres
+       if: ${{ inputs.use_postgres }}
+-      uses: ikalnytskyi/action-setup-postgres@v4
++      uses: ikalnytskyi/action-setup-postgres@fd37e265ec6a48981d62fa415f1fafd03bfd261c # v4
+ 
+     - name: Setup Test Variables
+       shell: bash
+@@ -48,14 +50,14 @@ runs:
+         echo "Sonarr__Postgres__Password=postgres" >> "$GITHUB_ENV"
+ 
+     - name: Download Artifact
+-      uses: actions/download-artifact@v4
++      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+       with:
+         name: ${{ inputs.artifact }}
+         path: _tests
+ 
+     - name: Download Binary Artifact
+       if: ${{ inputs.integration_tests }}
+-      uses: actions/download-artifact@v4
++      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+       with:
+         name: ${{ inputs.binary_artifact }}
+         path: _output
+@@ -77,11 +79,12 @@ runs:
+ 
+     - name: Run tests
+       shell: bash
+-      run: dotnet test ./_tests/Sonarr.*.Test.dll --filter "${{ inputs.filter }}" --logger "trx;LogFileName=${{ env.RESULTS_NAME }}.trx" --logger "GitHubActions;summary.includePassedTests=true;summary.includeSkippedTests=true"
++      run: dotnet test ./_tests/Sonarr.*.Test.dll --filter "${{ inputs.filter }}" --logger "trx;LogFileName=${{ env.RESULTS_NAME }}.trx"
+ 
+     - name: Upload Test Results
+       if: ${{ !cancelled() }}
+-      uses: actions/upload-artifact@v4
++      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+       with:
+         name: results-${{ env.RESULTS_NAME }}
+         path: TestResults/*.trx
++        retention-days: 7
+diff --git a/.github/dependabot.yml b/.github/dependabot.yml
+deleted file mode 100644
+index f33a02cd16e48a11403f8a847d5f2fd282e1559a..0000000000000000000000000000000000000000
+--- a/.github/dependabot.yml
++++ /dev/null
+@@ -1,12 +0,0 @@
+-# To get started with Dependabot version updates, you'll need to specify which
+-# package ecosystems to update and where the package manifests are located.
+-# Please see the documentation for more information:
+-# https://docs.github.com/github/administering-a-repository/configuration-options-for-dependency-updates
+-# https://containers.dev/guide/dependabot
+-
+-version: 2
+-updates:
+- - package-ecosystem: "devcontainers"
+-   directory: "/"
+-   schedule:
+-     interval: weekly
+diff --git a/.github/workflows/api_docs.yml b/.github/workflows/api_docs.yml
+deleted file mode 100644
+index dfd8ce0e25929d24df72dbb93ab1c9d9fd4513b0..0000000000000000000000000000000000000000
+--- a/.github/workflows/api_docs.yml
++++ /dev/null
+@@ -1,52 +0,0 @@
+-name: 'API Docs'
+-
+-on:
+-  workflow_dispatch:
+-  schedule:
+-    - cron: '0 0 * * 1'
+-  push:
+-    branches:
+-      - develop
+-    paths:
+-      - ".github/workflows/api_docs.yml"
+-      - "docs.sh"
+-      - "src/Sonarr.Api.*/**"
+-      - "src/Sonarr.Http/**"
+-      - "src/**/*.csproj"
+-      - "src/*"
+-
+-concurrency:
+-  group: ${{ github.workflow }}-${{ github.ref }}
+-  cancel-in-progress: true
+-
+-jobs:
+-  api_docs:
+-    runs-on: ubuntu-latest
+-    if: github.repository == 'Sonarr/Sonarr'
+-    permissions:
+-      contents: write
+-    steps:
+-      - uses: actions/checkout@v4
+-
+-      - name: Setup dotnet
+-        uses: actions/setup-dotnet@v4
+-        id: setup-dotnet
+-
+-      - name: Create openapi.json
+-        run: ./docs.sh Linux
+-
+-      - name: Commit API Docs Change
+-        continue-on-error: true
+-        run: |
+-          git config --global user.email "development@sonarr.tv"
+-          git config --global user.name "Sonarr"
+-          git checkout -b api-docs
+-          git add src
+-          if git status | grep -q modified
+-          then
+-            git commit -am 'Automated API Docs update' -m "ignore-downstream"
+-            git push -f --set-upstream origin api-docs
+-            curl -X POST -H "Authorization: Bearer ${{ secrets.OPENAPI_PAT }}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/sonarr/sonarr/pulls -d '{"head":"api-docs","base":"develop","title":"Update API docs"}'
+-          else
+-            echo "No changes since last run"
+-          fi
+diff --git a/.github/workflows/build.yml b/.github/workflows/build.yml
+index ac1573213f6acccaab09b0ff6a01bc79835c6b95..da40606f7abbea5f3e91c9685e092ce926058eaf 100644
+--- a/.github/workflows/build.yml
++++ b/.github/workflows/build.yml
+@@ -10,9 +10,14 @@ on:
+   pull_request:
+     branches:
+       - develop
++      - main
+     paths-ignore:
+       - "src/NzbDrone.Core/Localization/Core/**"
+       - "src/Sonarr.Api.*/openapi.json"
++  workflow_dispatch:
++
++permissions:
++  contents: read
+ 
+ concurrency:
+   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+@@ -22,7 +27,7 @@ env:
+   FRAMEWORK: net6.0
+   RAW_BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+   SONARR_MAJOR_VERSION: 4
+-  VERSION: 4.0.17
++  UPSTREAM_VERSION: 4.0.17.2952
+ 
+ jobs:
+   backend:
+@@ -30,29 +35,33 @@ jobs:
+     outputs:
+       framework: ${{ steps.variables.outputs.framework }}
+       major_version: ${{ steps.variables.outputs.major_version }}
+-      version: ${{ steps.variables.outputs.version }}
++      app_version: ${{ steps.variables.outputs.app_version }}
+     steps:
+       - name: Check out
+-        uses: actions/checkout@v4
++        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
++        with:
++          persist-credentials: false
++          fetch-depth: 1
+ 
+       - name: Setup .NET
+-        uses: actions/setup-dotnet@v4
++        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
++        with:
++          dotnet-version: 6.0.100
+ 
+       - name: Setup Environment Variables
+         id: variables
+         shell: bash
+         run: |
+-          # Add 800 to the build number because GitHub won't let us pick an arbitrary starting point
+-          SONARR_VERSION="${{ env.VERSION }}.$((${{ github.run_number }}+800))"
++          APP_VERSION="${{ env.UPSTREAM_VERSION }}"
+           DOTNET_VERSION=$(jq -r '.sdk.version' global.json)
+ 
+           echo "SDK_PATH=${{ env.DOTNET_ROOT }}/sdk/${DOTNET_VERSION}" >> "$GITHUB_ENV"
+-          echo "SONARR_VERSION=$SONARR_VERSION" >> "$GITHUB_ENV"
++          echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
+           echo "BRANCH=${RAW_BRANCH_NAME//\//-}" >> "$GITHUB_ENV"
+ 
+           echo "framework=${{ env.FRAMEWORK }}" >> "$GITHUB_OUTPUT"
+           echo "major_version=${{ env.SONARR_MAJOR_VERSION }}" >> "$GITHUB_OUTPUT"
+-          echo "version=$SONARR_VERSION" >> "$GITHUB_OUTPUT"
++          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+ 
+       - name: Enable Extra Platforms In SDK
+         shell: bash
+@@ -62,8 +71,6 @@ jobs:
+         shell: bash
+         run: ./build.sh --backend --enable-extra-platforms --packages
+ 
+-      # Test Artifacts
+-
+       - name: Publish win-x64 Test Artifact
+         uses: ./.github/actions/publish-test-artifact
+         with:
+@@ -82,37 +89,45 @@ jobs:
+           framework: ${{ env.FRAMEWORK }}
+           runtime: osx-arm64
+ 
+-      # Build Artifacts (grouped by OS)
+-
+       - name: Publish FreeBSD Artifact
+-        uses: actions/upload-artifact@v4
++        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+         with:
+           name: build_freebsd
+           path: _artifacts/freebsd-*/**/*
++          retention-days: 7
++
+       - name: Publish Linux Artifact
+-        uses: actions/upload-artifact@v4
++        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+         with:
+           name: build_linux
+           path: _artifacts/linux-*/**/*
++          retention-days: 7
++
+       - name: Publish macOS Artifact
+-        uses: actions/upload-artifact@v4
++        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+         with:
+           name: build_macos
+           path: _artifacts/osx-*/**/*
++          retention-days: 7
++
+       - name: Publish Windows Artifact
+-        uses: actions/upload-artifact@v4
++        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+         with:
+           name: build_windows
+           path: _artifacts/win-*/**/*
++          retention-days: 7
+ 
+   frontend:
+     runs-on: ubuntu-latest
+     steps:
+       - name: Check out
+-        uses: actions/checkout@v4
++        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
++        with:
++          persist-credentials: false
++          fetch-depth: 1
+ 
+       - name: Volta
+-        uses: volta-cli/action@v4
++        uses: volta-cli/action@5c175f92dea6f48441c436471e6479dbc192e194 # v4
+ 
+       - name: Yarn Install
+         run: yarn install
+@@ -127,10 +142,11 @@ jobs:
+         run: yarn build --env production
+ 
+       - name: Publish UI Artifact
+-        uses: actions/upload-artifact@v4
++        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+         with:
+           name: build_ui
+           path: _output/UI/**/*
++          retention-days: 7
+ 
+   unit_test:
+     needs: backend
+@@ -151,7 +167,10 @@ jobs:
+     runs-on: ${{ matrix.os }}
+     steps:
+       - name: Check out
+-        uses: actions/checkout@v4
++        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
++        with:
++          persist-credentials: false
++          fetch-depth: 1
+ 
+       - name: Test
+         uses: ./.github/actions/test
+@@ -166,7 +185,10 @@ jobs:
+     runs-on: ubuntu-latest
+     steps:
+       - name: Check out
+-        uses: actions/checkout@v4
++        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
++        with:
++          persist-credentials: false
++          fetch-depth: 1
+ 
+       - name: Test
+         uses: ./.github/actions/test
+@@ -202,7 +224,10 @@ jobs:
+     runs-on: ${{ matrix.os }}
+     steps:
+       - name: Check out
+-        uses: actions/checkout@v4
++        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
++        with:
++          persist-credentials: false
++          fetch-depth: 1
+ 
+       - name: Test
+         uses: ./.github/actions/test
+@@ -216,42 +241,15 @@ jobs:
+           binary_path: ${{ matrix.binary_path }}
+ 
+   deploy:
+-    if: ${{ github.ref_name == 'develop' || github.ref_name == 'main' }}
++    if: ${{ github.ref_name == 'main' }}
+     needs: [backend, frontend, unit_test, unit_test_postgres, integration_test]
++    permissions:
++      contents: write
++      packages: write
+     secrets: inherit
+-    uses: ./.github/workflows/deploy.yml
++    uses: ./.github/workflows/release.yml
+     with:
+       framework: ${{ needs.backend.outputs.framework }}
+       branch: ${{ github.ref_name }}
+       major_version: ${{ needs.backend.outputs.major_version }}
+-      version: ${{ needs.backend.outputs.version }}
+-
+-  notify:
+-    name: Discord Notification
+-    needs:
+-      [
+-        backend,
+-        frontend,
+-        unit_test,
+-        unit_test_postgres,
+-        integration_test,
+-        deploy,
+-      ]
+-    if: ${{ !cancelled() && (github.ref_name == 'develop' || github.ref_name == 'main') }}
+-    env:
+-      STATUS: ${{ contains(needs.*.result, 'failure') && 'failure' || 'success' }}
+-    runs-on: ubuntu-latest
+-
+-    steps:
+-      - name: Notify
+-        uses: tsickert/discord-webhook@v6.0.0
+-        with:
+-          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+-          username: "GitHub Actions"
+-          avatar-url: "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"
+-          embed-title: "${{ github.workflow }}: ${{ env.STATUS == 'success' && 'Success' || 'Failure' }}"
+-          embed-url: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+-          embed-description: |
+-            **Branch** ${{ github.ref }}
+-            **Build** ${{ needs.backend.outputs.version }}
+-          embed-color: ${{ env.STATUS == 'success' && '3066993' || '15158332' }}
++      app_version: ${{ needs.backend.outputs.app_version }}
+diff --git a/.github/workflows/conflict_labeler.yml b/.github/workflows/conflict_labeler.yml
+deleted file mode 100644
+index e9afb71a3d0f1c8e313d5f4f7a951e2a5b6888db..0000000000000000000000000000000000000000
+--- a/.github/workflows/conflict_labeler.yml
++++ /dev/null
+@@ -1,26 +0,0 @@
+-name: Merge Conflict Labeler
+-
+-on:
+-  push:
+-    branches:
+-      - develop
+-  pull_request_target:
+-    branches:
+-      - develop
+-    types: [synchronize]
+-
+-jobs:
+-  label:
+-    name: Labeling
+-    runs-on: ubuntu-latest
+-    if: ${{ github.repository == 'Sonarr/Sonarr' }}
+-    permissions:
+-      contents: read
+-      pull-requests: write
+-    steps:
+-      - name: Apply label
+-        uses: eps1lon/actions-label-merge-conflict@v3
+-        with:
+-          dirtyLabel: 'merge-conflict'
+-          repoToken: '${{ secrets.GITHUB_TOKEN }}'
+-          
+\ No newline at end of file
+diff --git a/.github/workflows/deploy.yml b/.github/workflows/deploy.yml
+deleted file mode 100644
+index 4fa5b54ee366b12e75d50c0fd34f289b662e2380..0000000000000000000000000000000000000000
+--- a/.github/workflows/deploy.yml
++++ /dev/null
+@@ -1,160 +0,0 @@
+-name: Deploy
+-
+-on:
+-  workflow_call:
+-    inputs:
+-      framework: 
+-        description: '.net framework'
+-        type: string
+-        required: true
+-      branch:
+-        description: 'Git branch used for this build'
+-        type: string
+-        required: true
+-      major_version:
+-        description: 'Sonarr major version'
+-        type: string
+-        required: true
+-      version:
+-        description: 'Sonarr version'
+-        type: string
+-        required: true
+-    secrets:
+-      SERVICES_API_KEY:
+-        required: true
+-
+-jobs:
+-  package:
+-    strategy:
+-      matrix:
+-        platform: [freebsd, linux, macos, windows]
+-        include:
+-          - platform: freebsd
+-            os: ubuntu-latest
+-          - platform: linux
+-            os: ubuntu-latest
+-          - platform: macos
+-            os: ubuntu-latest
+-          - platform: windows
+-            os: windows-latest
+-
+-    runs-on: ${{ matrix.os }}
+-    steps:
+-    - name: Check out
+-      uses: actions/checkout@v4
+-
+-    - name: Package
+-      uses: ./.github/actions/package
+-      with:
+-        framework: ${{ inputs.framework }}
+-        platform: ${{ matrix.platform }}
+-        artifact: build_${{ matrix.platform }}
+-        branch: ${{ inputs.branch }}
+-        major_version: ${{ inputs.major_version }}
+-        version: ${{ inputs.version }}
+-
+-  release:
+-    needs: package
+-    runs-on: ubuntu-latest
+-    permissions:
+-      contents: write
+-    steps:
+-    - name: Check out
+-      uses: actions/checkout@v4
+-
+-    - name: Download release artifacts
+-      uses: actions/download-artifact@v4
+-      with:
+-        path: _artifacts
+-        pattern: release_*
+-        merge-multiple: true
+-
+-    - name: Get Previous Release
+-      id: previous-release
+-      uses: cardinalby/git-get-release-action@v1
+-      env:
+-        GITHUB_TOKEN: ${{ github.token }}
+-      with:
+-        latest: true
+-        prerelease: ${{ inputs.branch != 'main' }}
+-
+-    - name: Generate Release Notes
+-      id: generate-release-notes
+-      uses: actions/github-script@v7
+-      with:
+-        github-token: ${{ github.token }}
+-        result-encoding: string
+-        script: |
+-          const { data } = await github.rest.repos.generateReleaseNotes({
+-            owner: context.repo.owner,
+-            repo: context.repo.repo,
+-            tag_name: 'v${{ inputs.version }}',
+-            target_commitish: '${{ github.sha }}',
+-            previous_tag_name: '${{ steps.previous-release.outputs.tag_name }}',
+-          })
+-          return data.body
+-
+-    - name: Create release
+-      uses: ncipollo/release-action@v1
+-      with:
+-        artifacts: _artifacts/Sonarr.*
+-        commit: ${{ github.sha }}
+-        generateReleaseNotes: false
+-        body: ${{ steps.generate-release-notes.outputs.result }}
+-        name: ${{ inputs.version }}
+-        prerelease: ${{ inputs.branch != 'main' }}
+-        skipIfReleaseExists: true
+-        tag: v${{ inputs.version }}
+-
+-    - name: Publish to Services
+-      shell: bash
+-      working-directory: _artifacts
+-      run: |
+-        branch=${{ inputs.branch }}
+-        version=${{ inputs.version }}
+-        lastCommit=${{ github.sha }}
+-        
+-        hashes="["
+-        
+-        addHash() {
+-          path=$1
+-          os=$2
+-          arch=$3
+-          type=$4
+-        
+-          local hash=$(sha256sum *.$version.$path | awk '{ print $1; }')
+-          echo "{ \""Os\"": \""$os\"", \""Arch\"": \""$arch\"", \""Type\"": \""$type\"", \""Hash\"": \""$hash\"" }"
+-        }
+-        
+-        hashes="$hashes $(addHash "linux-arm.tar.gz" "linux" "arm" "archive")"
+-        hashes="$hashes, $(addHash "linux-arm64.tar.gz" "linux" "arm64" "archive")"
+-        hashes="$hashes, $(addHash "linux-x64.tar.gz" "linux" "x64" "archive")"
+-        # hashes="$hashes, $(addHash "linux-x86.tar.gz" "linux" "x86" "archive")"
+-        
+-        # hashes="$hashes, $(addHash "linux-musl-arm.tar.gz" "linuxmusl" "arm" "archive")"
+-        hashes="$hashes, $(addHash "linux-musl-arm64.tar.gz" "linuxmusl" "arm64" "archive")"
+-        hashes="$hashes, $(addHash "linux-musl-x64.tar.gz" "linuxmusl" "x64" "archive")"
+-        
+-        hashes="$hashes, $(addHash "osx-arm64.tar.gz" "osx" "arm64" "archive")"
+-        hashes="$hashes, $(addHash "osx-x64.tar.gz" "osx" "x64" "archive")"
+-        
+-        hashes="$hashes, $(addHash "osx-arm64-app.zip" "osx" "arm64" "installer")"
+-        hashes="$hashes, $(addHash "osx-x64-app.zip" "osx" "x64" "installer")"
+-        
+-        hashes="$hashes, $(addHash "win-x64.zip" "windows" "x64" "archive")"
+-        hashes="$hashes, $(addHash "win-x86.zip" "windows" "x86" "archive")"
+-        
+-        hashes="$hashes, $(addHash "win-x64-installer.exe" "windows" "x64" "installer")"
+-        hashes="$hashes, $(addHash "win-x86-installer.exe" "windows" "x86" "installer")"
+-        
+-        hashes="$hashes, $(addHash "freebsd-x64.tar.gz" "freebsd" "x64" "archive")"
+-        
+-        hashes="$hashes ]"
+-        
+-        json="{\""branch\"":\""$branch\"", \""version\"":\""$version\"", \""lastCommit\"":\""$lastCommit\"", \""hashes\"":$hashes, \""gitHubRelease\"":true}"
+-        url="https://services.sonarr.tv/v1/update"
+-        
+-        echo "Publishing update $version ($branch) to: $url"
+-        echo "$json"
+-        
+-        curl -H "Content-Type: application/json" -H "X-Api-Key: ${{ secrets.SERVICES_API_KEY }}" -X POST -d "$json" --fail-with-body $url
+diff --git a/.github/workflows/labeler.yml b/.github/workflows/labeler.yml
+deleted file mode 100644
+index df54c0fff5acbafe2aebeda7ba54f0b84cec801d..0000000000000000000000000000000000000000
+--- a/.github/workflows/labeler.yml
++++ /dev/null
+@@ -1,13 +0,0 @@
+-name: "Pull Request Labeler"
+-on:
+-  - pull_request_target
+-
+-jobs:
+-  triage:
+-    permissions:
+-      contents: read
+-      pull-requests: write
+-    runs-on: ubuntu-latest
+-    if: github.repository == 'Sonarr/Sonarr'
+-    steps:
+-      - uses: actions/labeler@v5
+diff --git a/.github/workflows/lock.yml b/.github/workflows/lock.yml
+deleted file mode 100644
+index d775234db998d0be940a885d7216f4e30a2fee5b..0000000000000000000000000000000000000000
+--- a/.github/workflows/lock.yml
++++ /dev/null
+@@ -1,22 +0,0 @@
+-name: 'Lock threads'
+-
+-on:
+-  workflow_dispatch:
+-  schedule:
+-    - cron: '0 0 * * *'
+-
+-jobs:
+-  lock:
+-    runs-on: ubuntu-latest
+-    if: github.repository == 'Sonarr/Sonarr'
+-    steps:
+-      - uses: dessant/lock-threads@v5
+-        with:
+-          github-token: ${{ github.token }}
+-          issue-inactive-days: '90'
+-          exclude-issue-created-before: ''
+-          exclude-any-issue-labels: 'one-day-maybe'
+-          add-issue-labels: ''
+-          issue-comment: ''
+-          issue-lock-reason: 'resolved'
+-          process-only: ''
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+new file mode 100644
+index 0000000000000000000000000000000000000000..33856643da3cbe26a4ea0f3ce55fe0a8a915244c
+--- /dev/null
++++ b/.github/workflows/release.yml
+@@ -0,0 +1,279 @@
++name: Release
++
++on:
++  workflow_call:
++    inputs:
++      framework:
++        description: ".net framework"
++        required: true
++        type: string
++      branch:
++        description: "Git branch used for this build"
++        required: true
++        type: string
++      major_version:
++        description: "Sonarr major version"
++        required: true
++        type: string
++      app_version:
++        description: "Sonarr app version"
++        required: true
++        type: string
++    secrets:
++      GHCR_TOKEN:
++        required: false
++
++permissions:
++  contents: write
++  packages: write
++
++jobs:
++  resolve_version:
++    runs-on: ubuntu-latest
++    outputs:
++      release_version: ${{ steps.version.outputs.release_version }}
++
++    steps:
++      - name: Resolve Release Version
++        id: version
++        env:
++          APP_VERSION: ${{ inputs.app_version }}
++          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
++        shell: bash
++        run: |
++          set -euo pipefail
++
++          pattern="^v${APP_VERSION//./\\.}-anime\\.([0-9]+)$"
++          release_version=""
++          max_suffix=0
++
++          while IFS=$'\t' read -r tag_name target_commitish; do
++            if [[ -z "$tag_name" ]]; then
++              continue
++            fi
++
++            if [[ "$tag_name" =~ $pattern ]]; then
++              suffix="${BASH_REMATCH[1]}"
++
++              if (( suffix > max_suffix )); then
++                max_suffix=$suffix
++              fi
++
++              if [[ "$target_commitish" == "$GITHUB_SHA" ]]; then
++                release_version="${tag_name#v}"
++              fi
++            fi
++          done < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq '.[] | [.tag_name, .target_commitish] | @tsv')
++
++          if [[ -z "$release_version" ]]; then
++            release_version="${APP_VERSION}-anime.$((max_suffix + 1))"
++          fi
++
++          echo "release_version=$release_version" >> "$GITHUB_OUTPUT"
++
++  package:
++    needs: resolve_version
++    strategy:
++      matrix:
++        platform: [freebsd, linux, macos, windows]
++        include:
++          - platform: freebsd
++            os: ubuntu-latest
++          - platform: linux
++            os: ubuntu-latest
++          - platform: macos
++            os: ubuntu-latest
++          - platform: windows
++            os: windows-latest
++
++    runs-on: ${{ matrix.os }}
++
++    steps:
++      - name: Check out
++        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
++        with:
++          persist-credentials: false
++          fetch-depth: 1
++
++      - name: Package
++        uses: ./.github/actions/package
++        with:
++          framework: ${{ inputs.framework }}
++          platform: ${{ matrix.platform }}
++          artifact: build_${{ matrix.platform }}
++          branch: ${{ inputs.branch }}
++          major_version: ${{ inputs.major_version }}
++          app_version: ${{ inputs.app_version }}
++          release_version: ${{ needs.resolve_version.outputs.release_version }}
++
++  docker:
++    needs: [resolve_version, package]
++    runs-on: ubuntu-latest
++
++    steps:
++      - name: Check out
++        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
++        with:
++          persist-credentials: false
++          fetch-depth: 1
++
++      - name: Download Linux Artifact
++        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
++        with:
++          name: build_linux
++          path: _output
++
++      - name: Download UI Artifact
++        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
++        with:
++          name: build_ui
++          path: _output/UI
++
++      - name: Stage Docker Context
++        shell: bash
++        run: |
++          for mapping in "amd64:linux-x64" "arm64:linux-arm64"; do
++            IFS=":" read -r arch runtime <<< "$mapping"
++            target_dir="Sonarr-$arch"
++            runtime_dir="_output/$runtime/${{ inputs.framework }}/Sonarr"
++
++            rm -rf "$target_dir"
++            mkdir -p "$target_dir"
++            cp -R "$runtime_dir"/. "$target_dir"/
++            cp -R _output/UI "$target_dir"/UI
++          done
++
++          find Sonarr-amd64 Sonarr-arm64 \( -name "ffprobe" -o -name "Sonarr" -o -name "Sonarr.Update" \) -exec chmod a+x {} \;
++
++      - name: Set up QEMU
++        uses: docker/setup-qemu-action@v3
++
++      - name: Set up Docker Buildx
++        uses: docker/setup-buildx-action@v3
++
++      - name: Log in to GHCR
++        uses: docker/login-action@v3
++        with:
++          registry: ghcr.io
++          username: ${{ github.repository_owner }}
++          password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
++
++      - name: Compute Image Name
++        id: image
++        shell: bash
++        run: |
++          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
++
++      - name: Build and Push Docker Image
++        uses: docker/build-push-action@v6
++        with:
++          context: .
++          file: ./Dockerfile.release
++          platforms: linux/amd64,linux/arm64
++          push: true
++          tags: |
++            ${{ steps.image.outputs.name }}:${{ needs.resolve_version.outputs.release_version }}
++          labels: |
++            org.opencontainers.image.title=sonarr-anime
++            org.opencontainers.image.description=Anime-focused Sonarr builds
++            org.opencontainers.image.url=https://github.com/${{ github.repository }}
++            org.opencontainers.image.source=https://github.com/${{ github.repository }}
++            org.opencontainers.image.version=${{ needs.resolve_version.outputs.release_version }}
++            org.opencontainers.image.revision=${{ github.sha }}
++
++  release:
++    needs: [resolve_version, package, docker]
++    runs-on: ubuntu-latest
++
++    steps:
++      - name: Download Release Artifacts
++        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
++        with:
++          path: _artifacts
++          pattern: release_*
++          merge-multiple: true
++
++      - name: Create Release
++        env:
++          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
++          APP_VERSION: ${{ inputs.app_version }}
++          RELEASE_VERSION: ${{ needs.resolve_version.outputs.release_version }}
++          RELEASE_TAG: v${{ needs.resolve_version.outputs.release_version }}
++        shell: bash
++        run: |
++          if gh release view "$RELEASE_TAG" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
++            echo "Release $RELEASE_TAG already exists, skipping."
++            exit 0
++          fi
++
++          gh release create "$RELEASE_TAG" _artifacts/Sonarr.* \
++            --repo "${GITHUB_REPOSITORY}" \
++            --title "$RELEASE_VERSION" \
++            --notes "Automated release for $RELEASE_VERSION (app version $APP_VERSION)." \
++            --target "${GITHUB_SHA}"
++
++  publish_latest:
++    needs: [resolve_version, docker, release]
++    runs-on: ubuntu-latest
++
++    steps:
++      - name: Set up Docker Buildx
++        uses: docker/setup-buildx-action@v3
++
++      - name: Log in to GHCR
++        uses: docker/login-action@v3
++        with:
++          registry: ghcr.io
++          username: ${{ github.repository_owner }}
++          password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
++
++      - name: Compute Image Name
++        id: image
++        shell: bash
++        run: |
++          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
++
++      - name: Publish Latest Tag
++        shell: bash
++        run: |
++          docker buildx imagetools create \
++            --tag "${{ steps.image.outputs.name }}:latest" \
++            "${{ steps.image.outputs.name }}:${{ needs.resolve_version.outputs.release_version }}"
++
++  verify_release:
++    needs: [resolve_version, docker, release, publish_latest]
++    runs-on: ubuntu-latest
++
++    steps:
++      - name: Set up Docker Buildx
++        uses: docker/setup-buildx-action@v3
++
++      - name: Log in to GHCR
++        uses: docker/login-action@v3
++        with:
++          registry: ghcr.io
++          username: ${{ github.repository_owner }}
++          password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
++
++      - name: Compute Image Name
++        id: image
++        shell: bash
++        run: |
++          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
++
++      - name: Verify Release and Images
++        env:
++          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
++          IMAGE_NAME: ${{ steps.image.outputs.name }}
++          RELEASE_VERSION: ${{ needs.resolve_version.outputs.release_version }}
++        shell: bash
++        run: |
++          set -euo pipefail
++
++          gh release view "v$RELEASE_VERSION" --repo "${GITHUB_REPOSITORY}" >/dev/null
++          version_digest="$(docker buildx imagetools inspect "$IMAGE_NAME:$RELEASE_VERSION" | sed -n 's/^Digest:[[:space:]]*//p' | head -n 1)"
++          latest_digest="$(docker buildx imagetools inspect "$IMAGE_NAME:latest" | sed -n 's/^Digest:[[:space:]]*//p' | head -n 1)"
++
++          test -n "$version_digest"
++          test -n "$latest_digest"
++          test "$version_digest" = "$latest_digest"
+diff --git a/.github/workflows/repair-latest.yml b/.github/workflows/repair-latest.yml
+new file mode 100644
+index 0000000000000000000000000000000000000000..c6c59fd978aff38e808e7c03ce176570e9c7b872
+--- /dev/null
++++ b/.github/workflows/repair-latest.yml
+@@ -0,0 +1,87 @@
++name: Repair Latest Image Tag
++
++on:
++  workflow_dispatch:
++    inputs:
++      release_version:
++        description: "Released image tag to promote to latest"
++        required: true
++        type: string
++
++permissions:
++  contents: read
++  packages: write
++
++jobs:
++  repair_latest:
++    runs-on: ubuntu-latest
++
++    steps:
++      - name: Set up Docker Buildx
++        uses: docker/setup-buildx-action@v3
++
++      - name: Log in to GHCR
++        uses: docker/login-action@v3
++        with:
++          registry: ghcr.io
++          username: ${{ github.repository_owner }}
++          password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
++
++      - name: Compute Image Name
++        id: image
++        shell: bash
++        run: |
++          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
++
++      - name: Verify Release Exists
++        env:
++          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
++          RELEASE_VERSION: ${{ inputs.release_version }}
++        shell: bash
++        run: |
++          set -euo pipefail
++          gh release view "v$RELEASE_VERSION" --repo "${GITHUB_REPOSITORY}" >/dev/null
++
++      - name: Verify Versioned Image Exists
++        env:
++          IMAGE_NAME: ${{ steps.image.outputs.name }}
++          RELEASE_VERSION: ${{ inputs.release_version }}
++        shell: bash
++        run: |
++          set -euo pipefail
++          docker buildx imagetools inspect "$IMAGE_NAME:$RELEASE_VERSION" >/dev/null
++
++      - name: Promote Latest Tag
++        env:
++          IMAGE_NAME: ${{ steps.image.outputs.name }}
++          RELEASE_VERSION: ${{ inputs.release_version }}
++        shell: bash
++        run: |
++          set -euo pipefail
++          docker buildx imagetools create \
++            --tag "$IMAGE_NAME:latest" \
++            "$IMAGE_NAME:$RELEASE_VERSION"
++
++      - name: Summarize Promotion
++        env:
++          IMAGE_NAME: ${{ steps.image.outputs.name }}
++          RELEASE_VERSION: ${{ inputs.release_version }}
++        shell: bash
++        run: |
++          set -euo pipefail
++
++          source_digest="$(docker buildx imagetools inspect "$IMAGE_NAME:$RELEASE_VERSION" | sed -n 's/^Digest:[[:space:]]*//p' | head -n 1)"
++          latest_digest="$(docker buildx imagetools inspect "$IMAGE_NAME:latest" | sed -n 's/^Digest:[[:space:]]*//p' | head -n 1)"
++
++          test -n "$source_digest"
++          test -n "$latest_digest"
++          test "$source_digest" = "$latest_digest"
++
++          {
++            echo "## Latest Tag Repair"
++            echo
++            echo "- Source image: \`$IMAGE_NAME:$RELEASE_VERSION\`"
++            echo "- Source digest: \`${source_digest:-unknown}\`"
++            echo "- Latest image: \`$IMAGE_NAME:latest\`"
++            echo "- Latest digest: \`${latest_digest:-unknown}\`"
++          } >> "$GITHUB_STEP_SUMMARY"
+diff --git a/.github/workflows/support-requests.yml b/.github/workflows/support-requests.yml
+deleted file mode 100644
+index adf5a8c4a0f2ea6c0a34fa62d9a7e3a21a150014..0000000000000000000000000000000000000000
+--- a/.github/workflows/support-requests.yml
++++ /dev/null
+@@ -1,29 +0,0 @@
+-name: 'Support Requests'
+-
+-on:
+-  issues:
+-    types: [labeled, unlabeled, reopened]
+-
+-permissions:
+-  issues: write
+-
+-jobs:
+-  action:
+-    runs-on: ubuntu-latest
+-    if: github.repository == 'Sonarr/Sonarr'
+-    steps:
+-      - uses: dessant/support-requests@v4
+-        with:
+-          github-token: ${{ github.token }}
+-          support-label: 'support'
+-          issue-comment: >
+-            :wave: @{issue-author}, we use the issue tracker exclusively
+-            for bug reports and feature requests. However, this issue appears
+-            to be a support request. Please use one of the support channels: 
+-            [forums](https://forums.sonarr.tv/), [subreddit](https://www.reddit.com/r/sonarr/), 
+-            [discord](https://discord.gg/Ex7FmFK), or [IRC](https://web.libera.chat/?channels=#sonarr) 
+-            for support/questions.
+-          close-issue: true
+-          issue-close-reason: 'not planned'
+-          lock-issue: false
+-          issue-lock-reason: 'off-topic'
+diff --git a/.gitignore b/.gitignore
+index d17209556c8e83ed6325dc69ab706627c1841802..0bce041cd7f7ce6b9484eec7d1147db7a1c13827 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -165,3 +165,27 @@ src/.idea/
+ 
+ # Ignore Jetbrains IntelliJ Workspace Directories
+ .idea/
++
++# Local assistant tooling
++.claude/
++.agents/
++.codex/
++AGENTS.md
++docs/IMPLEMENTATION.md
++CLAUDE.md
++
++# Local Docker testing
++local-test/config/
++local-test/tv/
++local-test/prowlarr-config/
++Sonarr/
++docker-context/
++
++# Trace and debug logs (beyond *.log above)
++*.trace*.txt
++*.debug*.txt
++
++# Databases
++*.db
++*.db-shm
++*.db-wal
+diff --git a/CONTRIBUTING.md b/CONTRIBUTING.md
+index 9eedd495b76ebf8ef4d5a2467837d8fade205929..29b9ccee36bf795eedb541355dd2756feaae15cf 100644
+--- a/CONTRIBUTING.md
++++ b/CONTRIBUTING.md
+@@ -1,48 +1,89 @@
+-# How to Contribute #
++# Contributing to sonarr-anime
+ 
+-We're always looking for people to help make Sonarr even better, there are a number of ways to contribute.
++This is a **minimal Sonarr v4 fork** focused exclusively on anime search efficiency. Contributions are welcome, but must stay within the fork's narrow scope.
+ 
+-## Documentation ##
+-Setup guides, [FAQ](https://wiki.servarr.com/sonarr/faq), the more information we have on the [wiki](https://wiki.servarr.com/sonarr) the better.
++## Principles
+ 
+-## Development ##
++- **Minimal diff** — touch as few files as possible. Prefer modifying existing methods over adding new ones
++- **Surgical changes** — no cosmetic changes to upstream code (formatting, renames, reordering). Never refactor upstream code "while you're in there"
++- **Simple logic** — straightforward conditionals over clever abstractions. Anyone reading the code should understand the anime-specific logic immediately
++- **No scope creep** — if a change doesn't reduce redundant anime search queries or support that goal, it doesn't belong here
+ 
+-### Tools required ###
+-- Visual Studio 2019 or higher (https://www.visualstudio.com/vs/).  The community version is free and works (https://www.visualstudio.com/downloads/).
+-- HTML/Javascript editor of choice (VS Code/Sublime Text/Webstorm/Atom/etc)
+-- [Git](https://git-scm.com/downloads)
+-- [NodeJS](https://nodejs.org/en/download/) (Node 10.X.X or higher)
++## Branch model
++
++- `main` is the release branch, based on upstream Sonarr v4
++- Feature branches should be created from `main`
++- PRs target `main`
++- Upstream rebases from `Sonarr/Sonarr` are done manually when needed
++
++## Development setup
++
++### Tools required
++
++- [.NET 6 SDK](https://dotnet.microsoft.com/download)
++- [Node.js](https://nodejs.org/) (see `volta` config in `package.json`)
+ - [Yarn](https://yarnpkg.com/)
++- [Git](https://git-scm.com/)
++- [Docker](https://www.docker.com/) (for e2e testing)
++
++### Build
++
++```bash
++# Full build (backend + frontend)
++./build.sh --backend --frontend
++
++# Backend only (faster iteration)
++dotnet build src/Sonarr.sln -p:TreatWarningsAsErrors=false --no-restore
++```
++
++Do not use `--packages` — it tries to create Windows packages and fails on macOS/Linux.
++
++### Test
++
++```bash
++# Full unit suite (build first, then test against _tests/ DLLs)
++dotnet test _tests/net6.0/Sonarr.Core.Test.dll \
++  --filter "Category!=ManualTest&Category!=IntegrationTest&Category!=AutomationTest"
++
++# Targeted test run
++dotnet test _tests/net6.0/Sonarr.Core.Test.dll \
++  --filter "FullyQualifiedName~SomeFixture"
++```
++
++Do not run `dotnet test` against `src/*.csproj` directly — SA1200 warnings treated as errors block that path.
++
++### End-to-end testing
++
++Any PR that changes the search pipeline **must** include e2e verification:
++
++```bash
++# Direct baseline
++/test-e2e "Example Series" S01-S04
++
++# Aggregator-backed path
++/test-e2e-prowlarr "Example Series" S01-S04 --indexer <supported-backend>
++```
++
++Both produce structured pass/fail reports. A feature is not complete until the e2e report confirms expected behavior.
++
++## Pull request guidelines
++
++- One logical change per PR
++- Keep the diff small — if your PR touches more than 3-4 files, consider whether it can be split
++- Include e2e test results for search-path changes
++- PRs that only touch docs, workflows, or test infrastructure do not need e2e verification but should pass CI
++
++## Code style
++
++Follow Sonarr's conventions exactly:
++- C# with 4-space indentation
++- Unix line endings (LF)
++- Match surrounding code style — do not introduce new patterns
++
++## What belongs upstream
++
++If your change improves Sonarr for all users (not just anime), consider contributing it to [Sonarr/Sonarr](https://github.com/Sonarr/Sonarr) instead. This fork is intentionally narrow.
++
++## Questions
+ 
+-### Getting started ###
+-
+-1. Fork Sonarr
+-2. Clone the repository into your development machine. [*info*](https://docs.github.com/en/get-started/quickstart/fork-a-repo)
+-3. Install the required Node Packages `yarn install`
+-4. Start webpack to monitor your dev environment for any frontend changes that need post processing using `yarn start` command.
+-5. Build the project in Visual Studio, Setting startup project to `Sonarr.Console` and framework to `x86`
+-6. Debug the project in Visual Studio
+-7. Open http://localhost:8989
+-
+-### Contributing Code ###
+-- If you're adding a new, already requested feature, please comment on [Github Issues](https://github.com/Sonarr/Sonarr/issues "Github Issues") so work is not duplicated (If you want to add something not already on there, please talk to us first)
+-- Rebase from Sonarr's `develop` branch, don't merge
+-- Make meaningful commits, or squash them
+-- Feel free to make a pull request before work is complete, this will let us see where its at and make comments/suggest improvements
+-- Reach out to us on our [forums](https://forums.sonarr.tv/), [subreddit](https://www.reddit.com/r/sonarr/), [discord](https://discord.gg/Ex7FmFK), or [IRC](https://web.libera.chat/?channels=#sonarr) if you have any questions
+-- Add tests (unit/integration)
+-- Commit with *nix line endings for consistency (We checkout Windows and commit *nix)
+-- One feature/bug fix per pull request to keep things clean and easy to understand
+-- Use 4 spaces instead of tabs, this should be the default for VS 2019 and WebStorm
+-
+-### Pull Requesting ###
+-- Only make pull requests to develop (currently `develop`), never `main`, if you make a PR to master we'll comment on it and close it
+-- You're probably going to get some comments or questions from us, they will be to ensure consistency and maintainability
+-- We'll try to respond to pull requests as soon as possible, if its been a day or two, please reach out to us, we may have missed it
+-- Each PR should come from its own [feature branch](http://martinfowler.com/bliki/FeatureBranch.html) not develop in your fork, it should have a meaningful branch name (what is being added/fixed)
+-  - new-feature (Good)
+-  - fix-bug (Good)
+-  - patch (Bad)
+-  - develop (Bad)
+-
+-If you have any questions about any of this, please let us know.
++Open an issue or start a discussion in the repository. For general Sonarr questions unrelated to this fork, use the [upstream Sonarr community](https://wiki.servarr.com/sonarr).
+diff --git a/Dockerfile b/Dockerfile
+new file mode 100644
+index 0000000000000000000000000000000000000000..84de14f8914eef7f263ae05ce2ba4fe9b15c0878
+--- /dev/null
++++ b/Dockerfile
+@@ -0,0 +1,12 @@
++FROM mcr.microsoft.com/dotnet/runtime:6.0-jammy
++
++RUN apt-get update && apt-get install -y libsqlite3-0 libicu70 && rm -rf /var/lib/apt/lists/*
++
++WORKDIR /opt/sonarr
++
++COPY Sonarr/ .
++
++VOLUME /config /tv
++EXPOSE 8989
++
++ENTRYPOINT ["./Sonarr", "-nobrowser", "-data=/config"]
+diff --git a/Dockerfile.release b/Dockerfile.release
+new file mode 100644
+index 0000000000000000000000000000000000000000..9b84b6bc113a65e1de50642fc9682fb3a8cdfed1
+--- /dev/null
++++ b/Dockerfile.release
+@@ -0,0 +1,14 @@
++FROM mcr.microsoft.com/dotnet/runtime:6.0-jammy
++
++ARG TARGETARCH
++
++RUN apt-get update && apt-get install -y libsqlite3-0 libicu70 && rm -rf /var/lib/apt/lists/*
++
++WORKDIR /opt/sonarr
++
++COPY Sonarr-${TARGETARCH}/ .
++
++VOLUME /config /tv /downloads
++EXPOSE 8989
++
++ENTRYPOINT ["./Sonarr", "-nobrowser", "-data=/config"]
+diff --git a/README.md b/README.md
+index d43366f93602498d9d0c626271435553ca454355..df5755cb0ab9813c913f95fb6d4ffee8ce3f1b38 100644
+--- a/README.md
++++ b/README.md
+@@ -1,85 +1,184 @@
+-# <img width="24px" src="./Logo/256.png" alt="Sonarr"></img> Sonarr
++# sonarr-anime
+ 
+-[![Translated](https://translate.servarr.com/widget/servarr/sonarr/svg-badge.svg)](https://translate.servarr.com/engage/servarr/)
+-[![Backers on Open Collective](https://opencollective.com/Sonarr/backers/badge.svg)](#backers)
+-[![Sponsors on Open Collective](https://opencollective.com/Sonarr/sponsors/badge.svg)](#sponsors)
+-[![Mega Sponsors on Open Collective](https://opencollective.com/Sonarr/megasponsors/badge.svg)](#mega-sponsors)
++[![Build](https://github.com/RemingtonDev/sonarr-anime/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/RemingtonDev/sonarr-anime/actions/workflows/build.yml)
++[![GitHub Release](https://img.shields.io/github/v/release/RemingtonDev/sonarr-anime)](https://github.com/RemingtonDev/sonarr-anime/releases/latest)
++[![GHCR Image](https://img.shields.io/badge/ghcr.io-sonarr--anime-blue)](https://github.com/RemingtonDev/sonarr-anime/pkgs/container/sonarr-anime)
+ 
+-Sonarr is a PVR for Usenet and BitTorrent users. It can monitor multiple RSS feeds for new episodes of your favorite shows and will grab, sort and rename them. It can also be configured to automatically upgrade the quality of files already downloaded when a better quality format becomes available.
++A minimal [Sonarr](https://github.com/Sonarr/Sonarr) v4 fork focused on reducing redundant anime search queries. It patches the search pipeline to try pack search first, season search second, and per-episode only as a last resort.
+ 
+-## Getting Started
++## What this fork does
+ 
+-- [Download/Installation](https://sonarr.tv/#downloads-v3)
+-- [FAQ](https://wiki.servarr.com/sonarr/faq)
+-- [Wiki](https://wiki.servarr.com/Sonarr)
+-- [v4 Beta API Documentation](https://sonarr.tv/docs/api)
+-- [Donate](https://sonarr.tv/donate)
++Upstream Sonarr's anime search always falls through to per-episode queries — one HTTP request per episode — creating unnecessary load on genre-oriented indexers. This fork inserts intelligent early-exit checks into the search cascade:
+ 
+-## Support
++1. **Pack search** — if an approved release covers all wanted episodes across seasons, stop immediately
++2. **Season search** — per season, if an approved release covers all wanted episodes, skip its episodes
++3. **Per-episode search** — only for episodes not covered by steps 1-2
+ 
+-Note: GitHub Issues are for Bugs and Feature Requests Only
++Additional capabilities:
++- **Multi-season pack support** — recognizes `S01-S04` range and `S01+S02+S03+S04` list formats, uses them to skip later-season queries
++- **Bare-title pack matching** — during anime season search, releases like `[Group] Example Anime Title [1080p]` can be matched as Season 1 even when they include no episode numbers, no `S01`, and no `Season 1`, as long as they are just the series title plus safe trailing metadata
++- **Anime specials/OVAs** — Season 0 searches use OVA/Special-aware query generation instead of the pack fallback
++- **Bare-title + OVA matching** — releases with inline alternate-title parentheses and trailing metadata are correctly recognized during Season 0 special search
++- **S01+Specials co-coverage** — when a season pack explicitly advertises special content (e.g. `S01+Specials`, `S01+OVA`), the pack maps both the season episodes and exactly one wanted Season 0 special, allowing the S00 search to be skipped entirely
++- **Pack-first parity across supported backends** — protocol-backed search backends emit a broad title-only query before season-specific queries, matching the native pack-first behavior. Cross-season dedup prevents the same broad query from being sent twice
++- **Grab history fallback for unparseable titles** — when a download completes with a title that cannot be parsed (common for some anime packs), the fork falls back to the original grab history to identify the series and episodes. This prevents automatic imports from being blocked for releases already validated and approved during the search phase.
+ 
+-- [Forums](https://forums.sonarr.tv/)
+-- [Discord](https://discord.gg/M6BvZn5)
+-- [GitHub - Bugs and Feature Requests Only](https://github.com/Sonarr/Sonarr/issues)
+-- [IRC](https://web.libera.chat/?channels=#sonarr)
+-- [Reddit](https://www.reddit.com/r/sonarr)
+-- [Wiki](https://wiki.servarr.com/sonarr)
++## What this fork does not do
+ 
+-## Features
++- **Not a full product divergence.** The UI, library management, indexer configuration, download clients, quality profiles, and all non-anime search behavior are identical to upstream Sonarr v4.
++- **Not a replacement for upstream support.** Bugs or questions about general Sonarr behavior (import, notifications, database, API) should go to [upstream Sonarr](https://github.com/Sonarr/Sonarr).
++- **Some backend variants remain lightly tested.** Validation so far has focused on accessible indexers and standard protocol-backed backends. Non-standard implementations may behave differently.
+ 
+-### Current Features
++## Example behavior
+ 
+-- Support for major platforms: Windows, Linux, macOS, Raspberry Pi, etc.
+-- Automatically detects new episodes
+-- Can scan your existing library and download any missing episodes
+-- Can watch for better quality of the episodes you already have and do an automatic upgrade. _eg. from DVD to Blu-Ray_
+-- Automatic failed download handling will try another release if one fails
+-- Manual search so you can pick any release or to see why a release was not downloaded automatically
+-- Fully configurable episode renaming
+-- Full integration with SABnzbd and NZBGet
+-- Full integration with Kodi, Plex (notification, library update, metadata)
+-- Full support for specials and multi-episode releases
+-- And a beautiful UI
++Illustrative example only:
+ 
+-## Contributing
++| Series | Seasons | Episodes | Queries (fork example) | Queries (upstream-style example) | Per-episode fallbacks |
++|--------|---------|----------|------------------------|----------------------------------|-----------------------|
++| Anime Title | S01-S04 | 96 | 2 | ~104 | 0 |
++| Anime Title: Season 1 | S01 | 12 | 6 | ~15 | 0 |
++| Anime Title: Long Season | S01 | 26 | 3 | ~29 | 0 |
+ 
+-### Development
++The goal is simple: if a broad pack or season pack already covers the wanted episodes, the fork avoids sending unnecessary per-episode searches afterward. Actual results depend on indexer behavior and available releases.
+ 
+-This project exists thanks to all the people who contribute. [Contribute](CONTRIBUTING.md).
++## Tested paths
+ 
+-<a href="https://github.com/Sonarr/Sonarr/graphs/contributors"><img src="https://opencollective.com/Sonarr/contributors.svg?width=890&button=false" /></a>
++| Test path | Command | What it validates |
++|-----------|---------|-------------------|
++| Direct indexer path | `/test-e2e [series] [seasons]` | Pack-first cascade, broad query suppression, episode skip logic |
++| Aggregator-backed path | `/test-e2e-prowlarr [series] [seasons]` | Same cascade behavior through a protocol-backed path |
++| CI unit tests | Automatic on push/PR | Core test suite across Windows, macOS, and Linux |
++| CI unit tests (Postgres) | Automatic on push/PR | Core test suite on Ubuntu with Postgres environment enabled |
++| CI integration tests | Automatic on push/PR | Full integration test matrix across Windows, macOS, and Linux |
+ 
+-### Supporters
++**Note on query counts:** Native indexer implementations can be leaner than protocol-backed paths, which may also emit identifier-based and title-variant queries. The acceptance criteria are broad-first ordering, cross-season suppression, and cascade/skip behavior, not identical query totals across every backend.
+ 
+-This project would not be possible without the support of our users and software providers.
+-[**Become a sponsor or backer**](https://opencollective.com/sonarr) to help us out!
++## Known limitations
+ 
+-#### Mega Sponsors
++- Fork tracks Sonarr v4 (current stable) only; v5/develop is not targeted
++- Pack detection depends on release title parsing — unusual naming conventions may not be recognized
++- Protocol-backed indexers with non-standard search parameter support may not benefit from broad-first ordering
++- Multi-season coverage still depends on what a given indexer exposes for the searched title
+ 
+-[![Sponsors](https://opencollective.com/sonarr/tiers/mega-sponsor.svg?width=890)](https://opencollective.com/sonarr/contribute/mega-sponsor-21443/checkout)
++## Install
+ 
+-#### Sponsors
++### GitHub release archives
+ 
+-[![Flexible Sponsors](https://opencollective.com/sonarr/sponsors.svg?width=890)](https://opencollective.com/sonarr/contribute/sponsor-21457/checkout)
++Download the latest release from the [Releases page](https://github.com/RemingtonDev/sonarr-anime/releases/latest). Releases are published with version tags such as `v4.0.17.812`. Archives are available for Linux (x64, arm, arm64), macOS (x64, arm64), Windows (x64, x86), and FreeBSD.
+ 
+-#### Backers
++Extract and run like stock Sonarr — the binary is a drop-in replacement.
+ 
+-[![Backers](https://opencollective.com/sonarr/backers.svg?width=890)](https://opencollective.com/sonarr/contribute/backer-21442/checkout)
++### Docker
+ 
+-#### JetBrains
++Public images are available on GitHub Container Registry (GHCR):
+ 
+-Thank you to [<img src="https://resources.jetbrains.com/storage/products/company/brand/logos/jetbrains.png" alt="JetBrains" width="96">](http://www.jetbrains.com/) for providing us with free licenses to their great tools
++```
++ghcr.io/remingtondev/sonarr-anime
++```
+ 
+-[<img src="https://resources.jetbrains.com/storage/products/company/brand/logos/TeamCity.png" alt="TeamCity" width="64">](http://www.jetbrains.com/teamcity/)
++Supported architectures: `linux/amd64` and `linux/arm64`.
+ 
+-[<img src="https://resources.jetbrains.com/storage/products/company/brand/logos/ReSharper.png" alt="ReSharper" width="64">](http://www.jetbrains.com/resharper/)
++### Docker quick start
+ 
+-[<img src="https://resources.jetbrains.com/storage/products/company/brand/logos/dotTrace.png" alt="dotTrace" width="64">](http://www.jetbrains.com/dottrace/)
++**docker run:**
+ 
+-[<img src="https://resources.jetbrains.com/storage/products/company/brand/logos/Rider.png" alt="Rider" width="64">](http://www.jetbrains.com/rider/)
++```bash
++docker run -d \
++  --name sonarr-anime \
++  -p 8989:8989 \
++  -v /path/to/config:/config \
++  -v /path/to/tv:/tv \
++  -v /path/to/downloads:/downloads \
++  ghcr.io/remingtondev/sonarr-anime:latest
++```
+ 
+-### Licenses
++**docker compose:**
+ 
+-- [GNU GPL v3](http://www.gnu.org/licenses/gpl.html)
+-- Copyright 2010-2024
++```yaml
++services:
++  sonarr:
++    image: ghcr.io/remingtondev/sonarr-anime:latest
++    container_name: sonarr-anime
++    ports:
++      - "8989:8989"
++    volumes:
++      - ./config:/config
++      - /path/to/tv:/tv
++      - /path/to/downloads:/downloads
++    restart: unless-stopped
++```
++
++### NAS / self-hosted container platforms
++
++The public images support `amd64` and `arm64`, covering Synology, QNAP, Unraid, and similar NAS platforms.
++
++Required mounts:
++
++| Mount | Purpose |
++|-------|---------|
++| `/config` | Sonarr configuration, database, and logs. Persists across container restarts. |
++| `/tv` | TV library root folder. Must match what you configure inside Sonarr. |
++| `/downloads` | Download client output. Must be accessible to both Sonarr and your download client. |
++
++For conservative installs, pin to an exact release tag such as `4.0.17.812`. Use `latest` only if you want the current stable build.
++
++**Upgrading:**
++
++1. Stop the container
++2. Pull the new image (`docker pull ghcr.io/remingtondev/sonarr-anime:latest`)
++3. Restart with the same mounted `/config`
++
++Your configuration and database are preserved in the `/config` volume.
++
++## Versioning
++
++Releases use Sonarr's normal numeric build versioning.
++The About page also shows this fork's `releaseVersion`, which is the fork-specific release identifier surfaced alongside the normal upstream-style app versioning.
++
++Example:
++
++- GitHub release tag: `v4.0.17.812`
++- Docker image tag: `4.0.17.812`
++
++Successful `main` builds publish:
++
++- a GitHub Release tagged `v<version>`
++- packaged release archives
++- a GHCR image tagged `<version>`
++- `latest` after the matching GitHub Release has been created successfully
++
++## Image tags
++
++| Tag | Source | Description |
++|-----|--------|-------------|
++| `latest` | `main` | Alias for the most recent successful GitHub Release |
++| `4.0.17.812` | `main` | Pinned image tag for a specific published release |
++
++Stable releases come from `main`.
++
++## Security
++
++This is an independent fork, not the official Sonarr distribution. It is not affiliated with or endorsed by the Sonarr project.
++
++See [SECURITY.md](SECURITY.md) for how to report vulnerabilities in fork-owned code and release infrastructure.
++
++## Support expectations
++
++Issues are welcome for:
++- Reproducible anime-search regressions (pack cascade, query counts, parser failures)
++- Indexer compatibility reports for genre-oriented indexers and protocol-backed backends
++- Fork-owned workflow, docs, or release problems
++
++For general Sonarr support (UI, import, notifications, download clients, database), please use the [upstream Sonarr community](https://wiki.servarr.com/sonarr). This fork does not change those features.
++
++## Upstream sync
++
++This fork tracks Sonarr v4 and is rebased onto upstream manually when needed. There is no automatic sync PR flow; upstream changes are reviewed and merged deliberately to keep the fork surface small.
++
++## For developers
++
++- [Contributing guide](CONTRIBUTING.md) — how to contribute to this fork
++
++## License
++
++Same as upstream Sonarr — [GNU GPL v3](http://www.gnu.org/licenses/gpl.html).
+diff --git a/SECURITY.md b/SECURITY.md
+index a534ff2fb09dc18c294502bee17a7d9223d6fed4..6b1ae358f5bffcc01b7d8a37e14fb91d03b036e9 100644
+--- a/SECURITY.md
++++ b/SECURITY.md
+@@ -2,8 +2,17 @@
+ 
+ ## Reporting a Vulnerability
+ 
+-Please report (suspected) security vulnerabilities on Discord (preferred) to
+-either markus101
+-#2148 or Taloth#7357 or via email: security@sonarr.tv. You will receive a response from
+-us within 72 hours. If the issue is confirmed, we will release a patch as soon
+-as possible depending on complexity/severity.
++Please report suspected security vulnerabilities through [GitHub private vulnerability reporting](https://github.com/RemingtonDev/sonarr-anime/security/advisories/new). Do not file security issues as public GitHub issues.
++
++This fork publishes its own release archives and container images. This policy covers vulnerabilities in fork-owned code and release infrastructure. For vulnerabilities in upstream Sonarr unrelated to this fork's changes, please report them to the [Sonarr project](https://github.com/Sonarr/Sonarr).
++
++## What to Report
++
++- Vulnerabilities in fork-owned search optimization changes
++- Secrets or credentials exposed in release or CI infrastructure
++- Docker images or release artifacts that include unintended files
++
++## What Not to Report Here
++
++- General Sonarr vulnerabilities unrelated to this fork's patches — report those to upstream Sonarr
++- Feature requests or bug reports — use the [issue templates](https://github.com/RemingtonDev/sonarr-anime/issues/new/choose)
+diff --git a/build.sh b/build.sh
+index ee59d2f6176573c2faaea58ba3acd06f0e8f3dc8..92d2317f89b6307e9b68a032e01b0dd599d5676f 100755
+--- a/build.sh
++++ b/build.sh
+@@ -20,11 +20,13 @@ ProgressEnd()
+ 
+ UpdateVersionNumber()
+ {
+-    if [ "$SONARR_VERSION" != "" ]; then
+-        echo "Updating version info to: $SONARR_VERSION"
+-        sed -i'' -e "s/<AssemblyVersion>[0-9.*]\+<\/AssemblyVersion>/<AssemblyVersion>$SONARR_VERSION<\/AssemblyVersion>/g" src/Directory.Build.props
++    local appVersion="${APP_VERSION:-$SONARR_VERSION}"
++
++    if [ "$appVersion" != "" ]; then
++        echo "Updating version info to: $appVersion"
++        sed -i'' -e "s/<AssemblyVersion>[0-9.*]\+<\/AssemblyVersion>/<AssemblyVersion>$appVersion<\/AssemblyVersion>/g" src/Directory.Build.props
+         sed -i'' -e "s/<AssemblyConfiguration>[\$()A-Za-z-]\+<\/AssemblyConfiguration>/<AssemblyConfiguration>${BRANCH}<\/AssemblyConfiguration>/g" src/Directory.Build.props
+-        sed -i'' -e "s/<string>10.0.0.0<\/string>/<string>$SONARR_VERSION<\/string>/g" distribution/macOS/Sonarr.app/Contents/Info.plist
++        sed -i'' -e "s/<string>10.0.0.0<\/string>/<string>$appVersion<\/string>/g" distribution/macOS/Sonarr.app/Contents/Info.plist
+     fi
+ }
+ 
+@@ -275,6 +277,7 @@ UploadTestArtifacts()
+ UploadArtifacts()
+ {
+     local framework="$1"
++    local artifactVersion="${RELEASE_VERSION:-${APP_VERSION:-$SONARR_VERSION}}"
+ 
+     ProgressStart 'Publishing Artifacts'
+ 
+@@ -283,7 +286,7 @@ UploadArtifacts()
+     do
+         local runtime=$(basename "$dir")
+ 
+-        echo "##teamcity[publishArtifacts '$artifactsFolder/$runtime/$framework/** => Sonarr.$BRANCH.$SONARR_VERSION.$runtime.zip']"
++        echo "##teamcity[publishArtifacts '$artifactsFolder/$runtime/$framework/** => Sonarr.$BRANCH.$artifactVersion.$runtime.zip']"
+     done
+ 
+     # Debian Package / Windows installer / macOS app
+diff --git a/distribution/windows/setup/build.bat b/distribution/windows/setup/build.bat
+index 6c205089ee5721d50867fccb495b82e014ce3084..0864fe66f147ea3deced263de3c1e2e7572c17cb 100644
+--- a/distribution/windows/setup/build.bat
++++ b/distribution/windows/setup/build.bat
+@@ -1,5 +1,6 @@
+ @REM SET SONARR_MAJOR_VERSION=4
+-@REM SET SONARR_VERSION=4.0.0.5
++@REM SET APP_VERSION=4.0.17.2952
++@REM SET RELEASE_VERSION=4.0.17.2952-anime.1
+ @REM SET BRANCH=develop
+ @REM SET FRAMEWORK=net6.0
+ @REM SET RUNTIME=win-x64
+diff --git a/distribution/windows/setup/sonarr.iss b/distribution/windows/setup/sonarr.iss
+index 8401bdea9033b5f29deffaec4fc37f50dc643b1e..e2457af8085f5349cb9c7a3a52ea5832e54036de 100644
+--- a/distribution/windows/setup/sonarr.iss
++++ b/distribution/windows/setup/sonarr.iss
+@@ -6,8 +6,10 @@
+ #define AppURL "https://sonarr.tv/"
+ #define ForumsURL "https://forums.sonarr.tv/"
+ #define AppExeName "Sonarr.exe"
+-#define BuildNumber "4.0"
+-#define BuildNumber GetEnv('SONARR_VERSION')
++#define BuildNumber "4.0.17.2952-anime.1"
++#define BuildNumber GetEnv('RELEASE_VERSION')
++#define AppBuildVersion "4.0.17.2952"
++#define AppBuildVersion GetEnv('APP_VERSION')
+ #define MajorVersion GetEnv('SONARR_MAJOR_VERSION')
+ #define BranchName GetEnv('BRANCH')
+ #define Framework GetEnv('FRAMEWORK')
+@@ -19,7 +21,7 @@
+ ; (To generate a new GUID, click Tools | Generate GUID inside the IDE.)
+ AppId={{56C1065D-3523-4025-B76D-6F73F67F7F71}
+ AppName={#AppName}
+-AppVersion={#MajorVersion}
++AppVersion={#AppBuildVersion}
+ AppPublisher={#AppPublisher}
+ AppPublisherURL={#AppURL}
+ AppSupportURL={#ForumsURL}
+@@ -38,7 +40,7 @@ DisableReadyPage=True
+ CompressionThreads=2
+ Compression=lzma2/normal
+ AppContact={#ForumsURL}
+-VersionInfoVersion={#MajorVersion}
++VersionInfoVersion={#AppBuildVersion}
+ SetupLogging=yes
+ OutputDir="..\..\..\_artifacts"
+ AppverName={#AppName}
+diff --git a/docker/tests/mono/sonarr/Dockerfile b/docker/tests/mono/sonarr/Dockerfile
+deleted file mode 100644
+index f2ec42a9e1af09822f46a1f3f46e6df2d2c9e888..0000000000000000000000000000000000000000
+--- a/docker/tests/mono/sonarr/Dockerfile
++++ /dev/null
+@@ -1,32 +0,0 @@
+-FROM ubuntu:xenial
+-
+-ENV DEBIAN_FRONTEND noninteractive
+-ARG MONO_VERSION=5.20
+-ARG MONO_URL=stable-xenial/snapshots/$MONO_VERSION
+-
+-RUN apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 3FA7E0328081BFF6A14DA29AA6A19B38D3D831EF && \
+-    echo "deb http://download.mono-project.com/repo/debian $MONO_URL main" > /etc/apt/sources.list.d/mono-official-stable.list && \
+-    apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 2009837CBFFD68F45BC180471F4F90DE2A9B4BF8 && \
+-    echo "deb http://apt.sonarr.tv/ubuntu xenial main" > /etc/apt/sources.list.d/sonarr.list && \
+-    apt-get update && apt-get install -y \ 
+-        tofrodos tzdata \
+-        sonarr \
+-        sqlite3 mediainfo \
+-        && rm -rf /var/lib/apt/lists/*
+-
+-RUN apt-get update && apt-get install -y \ 
+-        libmono-system-runtime4.0-cil \
+-        libmono-system-net-http4.0-cil \
+-        && rm -rf /var/lib/apt/lists/*
+-
+-COPY startup.sh /startup.sh
+-RUN  fromdos /startup.sh
+-
+-WORKDIR /data/
+-VOLUME ["/data/_tests_linux", "/data/_output_linux", "/data/_tests_results"]
+-
+-RUN groupadd sonarrtst -g 4020 && useradd sonarrtst -u 4021 -g 4020 -m -s /bin/bash
+-USER sonarrtst
+-
+-CMD bash /startup.sh
+-
+diff --git a/frontend/src/App/AppUpdatedModalContent.tsx b/frontend/src/App/AppUpdatedModalContent.tsx
+index 6553d6270c32552b169db36ab6151e4e157b5aaf..e2a9ae0d943c21db8e188e87449a3e0d4a86954c 100644
+--- a/frontend/src/App/AppUpdatedModalContent.tsx
++++ b/frontend/src/App/AppUpdatedModalContent.tsx
+@@ -1,5 +1,6 @@
+ import React, { useCallback, useEffect } from 'react';
+ import { useDispatch, useSelector } from 'react-redux';
++import Alert from 'Components/Alert';
+ import Button from 'Components/Link/Button';
+ import LoadingIndicator from 'Components/Loading/LoadingIndicator';
+ import InlineMarkdown from 'Components/Markdown/InlineMarkdown';
+@@ -100,6 +101,12 @@ function AppUpdatedModalContent(props: AppUpdatedModalContentProps) {
+           />
+         </div>
+ 
++        <Alert kind="info">
++          This build includes anime-specific changes from the sonarr-anime fork.
++          The release notes below come from upstream Sonarr and may not list
++          fork-only behavior.
++        </Alert>
++
+         {isPopulated && !error && !!update ? (
+           <div>
+             {update.changes ? (
+diff --git a/frontend/src/Components/Markdown/InlineMarkdown.tsx b/frontend/src/Components/Markdown/InlineMarkdown.tsx
+index 80e99336a17c15c9423a3872885b8401de3f91c7..d67aff11b2bb48d784ded85cff6ce5f19fa7df8b 100644
+--- a/frontend/src/Components/Markdown/InlineMarkdown.tsx
++++ b/frontend/src/Components/Markdown/InlineMarkdown.tsx
+@@ -9,59 +9,40 @@ interface InlineMarkdownProps {
+ 
+ function InlineMarkdown(props: InlineMarkdownProps) {
+   const { className, data, blockClassName } = props;
+-
+-  // For now only replace links or code blocks (not both)
+   const markdownBlocks: (ReactElement | string)[] = [];
+ 
+   if (data) {
+-    const linkRegex = RegExp(/\[(.+?)\]\((.+?)\)/g);
++    const markdownRegex = /\[([^\]]+?)\]\(([^)]+?)\)|`([^`]+?)`/g;
+ 
+     let endIndex = 0;
+-    let match = null;
++    let match: RegExpExecArray | null = null;
+ 
+-    while ((match = linkRegex.exec(data)) !== null) {
++    while ((match = markdownRegex.exec(data)) !== null) {
+       if (match.index > endIndex) {
+-        markdownBlocks.push(data.substr(endIndex, match.index - endIndex));
++        markdownBlocks.push(data.slice(endIndex, match.index));
+       }
+ 
+-      markdownBlocks.push(
+-        <Link key={match.index} to={match[2]}>
+-          {match[1]}
+-        </Link>
+-      );
+-      endIndex = match.index + match[0].length;
+-    }
+-
+-    if (endIndex !== data.length && markdownBlocks.length > 0) {
+-      markdownBlocks.push(data.substr(endIndex, data.length - endIndex));
+-    }
+-
+-    const codeRegex = RegExp(/(?=`)`(?!`)[^`]*(?=`)`(?!`)/g);
+-
+-    endIndex = 0;
+-    match = null;
+-    let matchedCode = false;
+-
+-    while ((match = codeRegex.exec(data)) !== null) {
+-      matchedCode = true;
+-
+-      if (match.index > endIndex) {
+-        markdownBlocks.push(data.substr(endIndex, match.index - endIndex));
++      if (match[1] && match[2]) {
++        markdownBlocks.push(
++          <Link key={`link-${match.index}`} to={match[2]}>
++            {match[1]}
++          </Link>
++        );
++      } else if (match[3]) {
++        markdownBlocks.push(
++          <code
++            key={`code-${match.index}`}
++            className={blockClassName ?? undefined}
++          >
++            {match[3]}
++          </code>
++        );
+       }
+-
+-      markdownBlocks.push(
+-        <code
+-          key={`code-${match.index}`}
+-          className={blockClassName ?? undefined}
+-        >
+-          {match[0].substring(1, match[0].length - 1)}
+-        </code>
+-      );
+       endIndex = match.index + match[0].length;
+     }
+ 
+-    if (endIndex !== data.length && markdownBlocks.length > 0 && matchedCode) {
+-      markdownBlocks.push(data.substr(endIndex, data.length - endIndex));
++    if (markdownBlocks.length > 0 && endIndex < data.length) {
++      markdownBlocks.push(data.slice(endIndex));
+     }
+ 
+     if (markdownBlocks.length === 0) {
+diff --git a/frontend/src/System/Status/About/About.tsx b/frontend/src/System/Status/About/About.tsx
+index a7ca645365c93a1f616b14a2809a8ef90b3a53da..9c522d21c0fc8598a7fa9dec31591c0bc513121c 100644
+--- a/frontend/src/System/Status/About/About.tsx
++++ b/frontend/src/System/Status/About/About.tsx
+@@ -17,6 +17,7 @@ function About() {
+ 
+   const {
+     version,
++    releaseVersion,
+     packageVersion,
+     packageAuthor,
+     isNetCore,
+@@ -31,6 +32,8 @@ function About() {
+     startTime,
+   } = item;
+ 
++  const displayedVersion = releaseVersion || version;
++
+   useEffect(() => {
+     dispatch(fetchStatus());
+   }, [dispatch]);
+@@ -38,7 +41,19 @@ function About() {
+   return (
+     <FieldSet legend={translate('About')}>
+       <DescriptionList className={styles.descriptionList}>
+-        <DescriptionListItem title={translate('Version')} data={version} />
++        <DescriptionListItem
++          title="Fork"
++          data={
++            <InlineMarkdown
++              data={`sonarr-anime running, build \`${displayedVersion}\` · [RemingtonDev/sonarr-anime](https://github.com/RemingtonDev/sonarr-anime)`}
++            />
++          }
++        />
++
++        <DescriptionListItem
++          title={translate('Version')}
++          data={displayedVersion}
++        />
+ 
+         {packageVersion && (
+           <DescriptionListItem
+diff --git a/frontend/src/typings/SystemStatus.ts b/frontend/src/typings/SystemStatus.ts
+index d5eab3ca34ffd0d9c32945732ca505a5c02c05e5..e8b06e384de25cfbc05cb8c9f43e6efc66554b0d 100644
+--- a/frontend/src/typings/SystemStatus.ts
++++ b/frontend/src/typings/SystemStatus.ts
+@@ -24,6 +24,7 @@ interface SystemStatus {
+   packageUpdateMechanism: string;
+   packageUpdateMechanismMessage: string;
+   packageVersion: string;
++  releaseVersion: string;
+   runtimeName: string;
+   runtimeVersion: string;
+   sqliteVersion: string;
+diff --git a/global.json b/global.json
+index 5f5ece165083bf4d740b63836fbe0e2e42006f2f..10b65be86420429d3f1486032aa1be656250d5a3 100644
+--- a/global.json
++++ b/global.json
+@@ -1,5 +1,6 @@
+ {
+   "sdk": {
+-    "version": "6.0.405"
++    "version": "6.0.100",
++    "rollForward": "latestFeature"
+   }
+ }
+diff --git a/local-test/docker-compose.yml b/local-test/docker-compose.yml
+new file mode 100644
+index 0000000000000000000000000000000000000000..59ae2ac6c7662e1715c299ce8ac09faf41d84b60
+--- /dev/null
++++ b/local-test/docker-compose.yml
+@@ -0,0 +1,21 @@
++services:
++  sonarr:
++    image: sonarr-anime:local
++    container_name: sonarr-anime-local
++    platform: linux/amd64
++    ports:
++      - "8989:8989"
++    volumes:
++      - ./config:/config
++      - ./tv:/tv
++    restart: unless-stopped
++
++  prowlarr:
++    image: lscr.io/linuxserver/prowlarr@sha256:9ef5d8bf832edcacb6082f9262cb36087854e78eb7b1c3e1d4375056055b2d82  # 2.3.0.5236-ls139
++    container_name: prowlarr-local
++    platform: linux/amd64
++    ports:
++      - "9696:9696"
++    volumes:
++      - ./prowlarr-config:/config
++    restart: unless-stopped
+diff --git a/src/Directory.Build.props b/src/Directory.Build.props
+index 239a98d737d9a9935b20db9f72bb99b26b6f10d7..90d0d970beb271fd8aa27955112b0debe2c4ed8b 100644
+--- a/src/Directory.Build.props
++++ b/src/Directory.Build.props
+@@ -129,14 +129,21 @@
+ 
+   <!-- Standard testing packages -->
+   <ItemGroup Condition="'$(TestProject)'=='true'">
+-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.5.0" />
++    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+     <PackageReference Include="NUnit" Version="3.13.3" />
+-    <PackageReference Include="NUnit3TestAdapter" Version="3.17.0" />
+-    <PackageReference Include="NunitXml.TestLogger" Version="3.0.131" />
++    <PackageReference Include="NUnit3TestAdapter" Version="4.2.1" />
++    <PackageReference Include="NunitXml.TestLogger" Version="4.0.254" />
+   </ItemGroup>
+ 
+   <ItemGroup Condition="'$(TestProject)'=='true' and '$(TargetFramework)'=='net6.0'">
+-    <PackageReference Include="coverlet.collector" Version="3.0.4-preview.27.ge7cb7c3b40" />
++    <PackageReference Include="coverlet.collector" Version="6.0.2" />
++  </ItemGroup>
++
++  <ItemGroup Condition="'$(TestProject)'=='true' and '$(IsOSX)'=='true'">
++    <None Include="$(NuGetPackageRoot)system.data.sqlite.core.servarr\1.0.115.5-18\runtimes\osx-$(Architecture)\native\netstandard2.0\libsqlite3.dylib">
++      <Link>libsqlite3.dylib</Link>
++      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
++    </None>
+   </ItemGroup>
+ 
+   <PropertyGroup Condition="'$(SonarrProject)'=='true' and '$(EnableAnalyzers)'=='false'">
+diff --git a/src/Sonarr.Api.V3/System/SystemController.cs b/src/Sonarr.Api.V3/System/SystemController.cs
+index 80d177cfb5eb0c949ae2d343dad3668af228fcfd..122e2c96abc94b18fa21a729aa5255d25cc7961f 100644
+--- a/src/Sonarr.Api.V3/System/SystemController.cs
++++ b/src/Sonarr.Api.V3/System/SystemController.cs
+@@ -89,7 +89,8 @@ public SystemResource GetStatus()
+                 PackageVersion = _deploymentInfoProvider.PackageVersion,
+                 PackageAuthor = _deploymentInfoProvider.PackageAuthor,
+                 PackageUpdateMechanism = _deploymentInfoProvider.PackageUpdateMechanism,
+-                PackageUpdateMechanismMessage = _deploymentInfoProvider.PackageUpdateMechanismMessage
++                PackageUpdateMechanismMessage = _deploymentInfoProvider.PackageUpdateMechanismMessage,
++                ReleaseVersion = _deploymentInfoProvider.ReleaseVersion
+             };
+         }
+ 
+diff --git a/src/Sonarr.Api.V3/System/SystemResource.cs b/src/Sonarr.Api.V3/System/SystemResource.cs
+index 53f35921eb543dcc76b67e45962afb86ce6c3b0f..a89cfc703a6a8df6de6167b25812fff82f9753fd 100644
+--- a/src/Sonarr.Api.V3/System/SystemResource.cs
++++ b/src/Sonarr.Api.V3/System/SystemResource.cs
+@@ -38,6 +38,7 @@ public class SystemResource
+         public string PackageAuthor { get; set; }
+         public UpdateMechanism PackageUpdateMechanism { get; set; }
+         public string PackageUpdateMechanismMessage { get; set; }
++        public string ReleaseVersion { get; set; }
+         public Version DatabaseVersion { get; set; }
+         public DatabaseType DatabaseType { get; set; }
+     }
+diff --git a/src/Sonarr.Api.V3/openapi.json b/src/Sonarr.Api.V3/openapi.json
+index 6ac128ffd5bd37278762eb0c46287b4516356c57..015c9d2f2ab69abf9c9a10064ab10aed3be4f89a 100644
+--- a/src/Sonarr.Api.V3/openapi.json
++++ b/src/Sonarr.Api.V3/openapi.json
+@@ -12134,6 +12134,10 @@
+             "type": "string",
+             "nullable": true
+           },
++          "releaseVersion": {
++            "type": "string",
++            "nullable": true
++          },
+           "databaseVersion": {
+             "type": "string",
+             "nullable": true
+@@ -12480,4 +12484,4 @@
+       "apikey": [ ]
+     }
+   ]
+-}
+\ No newline at end of file
++}

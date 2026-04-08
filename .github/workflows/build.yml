@@ -27,7 +27,6 @@ env:
   FRAMEWORK: net6.0
   RAW_BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
   SONARR_MAJOR_VERSION: 4
-  UPSTREAM_VERSION: 4.0.17.2952
 
 jobs:
   backend:
@@ -48,11 +47,15 @@ jobs:
         with:
           dotnet-version: 6.0.100
 
+      - name: Load Upstream Metadata
+        shell: bash
+        run: ./scripts/fork/export-upstream-env.sh >> "$GITHUB_ENV"
+
       - name: Setup Environment Variables
         id: variables
         shell: bash
         run: |
-          APP_VERSION="${{ env.UPSTREAM_VERSION }}"
+          APP_VERSION="${UPSTREAM_VERSION}"
           DOTNET_VERSION=$(jq -r '.sdk.version' global.json)
 
           echo "SDK_PATH=${{ env.DOTNET_ROOT }}/sdk/${DOTNET_VERSION}" >> "$GITHUB_ENV"
