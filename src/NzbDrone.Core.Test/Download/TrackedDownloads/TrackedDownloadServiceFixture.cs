@@ -87,6 +87,189 @@ namespace NzbDrone.Core.Test.Download.TrackedDownloads
         }
 
         [Test]
+        public void should_use_grabbed_history_instead_of_newer_non_grab_history_when_tracking_download()
+        {
+            var grabbedHistory = new EpisodeHistory
+            {
+                DownloadId = "35238",
+                SourceTitle = "TV Series S01",
+                SeriesId = 5,
+                EpisodeId = 4,
+                EventType = EpisodeHistoryEventType.Grabbed
+            };
+
+            var importedHistory = new EpisodeHistory
+            {
+                DownloadId = "35238",
+                SourceTitle = @"C:\DropFolder\TV Series\TV Series - S01E01.mkv",
+                SeriesId = 99,
+                EpisodeId = 999,
+                EventType = EpisodeHistoryEventType.DownloadFolderImported
+            };
+
+            Mocker.GetMock<IHistoryService>()
+                .Setup(s => s.FindByDownloadId("35238"))
+                .Returns(new List<EpisodeHistory> { importedHistory, grabbedHistory });
+
+            var remoteEpisode = new RemoteEpisode
+            {
+                Series = new Series { Id = 5 },
+                Episodes = new List<Episode> { new Episode { Id = 4 } },
+                ParsedEpisodeInfo = new ParsedEpisodeInfo
+                {
+                    SeriesTitle = "TV Series",
+                    SeasonNumber = 1
+                },
+                MappedSeasonNumber = 1
+            };
+
+            Mocker.GetMock<IParsingService>()
+                .Setup(s => s.Map(It.Is<ParsedEpisodeInfo>(i => i.SeasonNumber == 1 && i.SeriesTitle == "TV Series"),
+                    5,
+                    It.Is<IEnumerable<int>>(episodes => episodes.SequenceEqual(new[] { 4 }))))
+                .Returns(remoteEpisode);
+
+            var client = new DownloadClientDefinition
+            {
+                Id = 1,
+                Protocol = DownloadProtocol.Torrent
+            };
+
+            var item = new DownloadClientItem
+            {
+                Title = "The torrent release folder",
+                DownloadId = "35238",
+                DownloadClientInfo = new DownloadClientItemClientInfo
+                {
+                    Protocol = client.Protocol,
+                    Id = client.Id,
+                    Name = client.Name
+                }
+            };
+
+            var trackedDownload = Subject.TrackDownload(client, item);
+
+            trackedDownload.RemoteEpisode.Should().NotBeNull();
+            trackedDownload.RemoteEpisode.Series.Id.Should().Be(5);
+            trackedDownload.RemoteEpisode.Episodes.Select(e => e.Id).Should().Equal(4);
+        }
+
+        [Test]
+        public void should_build_remote_episode_from_grabbed_history_when_titles_are_unparseable()
+        {
+            var grabbedTitle = "[Datte13] Grimgar of Fantasy and Ash [BD 1080p Hi10] [Dual-Audio FLAC]";
+            var grabbedHistory1 = new EpisodeHistory
+            {
+                DownloadId = "grimgar-pack",
+                SourceTitle = grabbedTitle,
+                SeriesId = 44,
+                EpisodeId = 1361,
+                EventType = EpisodeHistoryEventType.Grabbed
+            };
+            var grabbedHistory2 = new EpisodeHistory
+            {
+                DownloadId = "grimgar-pack",
+                SourceTitle = grabbedTitle,
+                SeriesId = 44,
+                EpisodeId = 1362,
+                EventType = EpisodeHistoryEventType.Grabbed
+            };
+            var importedHistory = new EpisodeHistory
+            {
+                DownloadId = "grimgar-pack",
+                SourceTitle = @"/data/media/anime/Grimgar, Ashes and Illusions (2016)/Grimgar, Ashes and Illusions (2016) - S01E01.mkv",
+                SeriesId = 44,
+                EpisodeId = 1361,
+                EventType = EpisodeHistoryEventType.DownloadFolderImported
+            };
+
+            Mocker.GetMock<IHistoryService>()
+                .Setup(s => s.FindByDownloadId("grimgar-pack"))
+                .Returns(new List<EpisodeHistory> { importedHistory, grabbedHistory2, grabbedHistory1 });
+
+            var remoteEpisode = new RemoteEpisode
+            {
+                Series = new Series { Id = 44 },
+                Episodes = new List<Episode> { new Episode { Id = 1361 }, new Episode { Id = 1362 } },
+                ParsedEpisodeInfo = new ParsedEpisodeInfo
+                {
+                    ReleaseTitle = grabbedTitle
+                }
+            };
+
+            Mocker.GetMock<IParsingService>()
+                .Setup(s => s.Map(It.Is<ParsedEpisodeInfo>(i => i.ReleaseTitle == grabbedTitle),
+                    44,
+                    It.Is<IEnumerable<int>>(episodes => episodes.SequenceEqual(new[] { 1362, 1361 }) || episodes.SequenceEqual(new[] { 1361, 1362 }))))
+                .Returns(remoteEpisode);
+
+            var client = new DownloadClientDefinition
+            {
+                Id = 1,
+                Protocol = DownloadProtocol.Torrent
+            };
+
+            var item = new DownloadClientItem
+            {
+                Title = "The torrent release folder",
+                DownloadId = "grimgar-pack",
+                DownloadClientInfo = new DownloadClientItemClientInfo
+                {
+                    Protocol = client.Protocol,
+                    Id = client.Id,
+                    Name = client.Name
+                }
+            };
+
+            var trackedDownload = Subject.TrackDownload(client, item);
+
+            trackedDownload.RemoteEpisode.Should().NotBeNull();
+            trackedDownload.RemoteEpisode.Series.Id.Should().Be(44);
+            trackedDownload.RemoteEpisode.Episodes.Select(e => e.Id).Should().Equal(1361, 1362);
+            trackedDownload.RemoteEpisode.ParsedEpisodeInfo.ReleaseTitle.Should().Be(grabbedTitle);
+        }
+
+        [Test]
+        public void should_leave_download_unresolved_when_no_grabbed_history_exists()
+        {
+            Mocker.GetMock<IHistoryService>()
+                .Setup(s => s.FindByDownloadId("35238"))
+                .Returns(new List<EpisodeHistory>
+                {
+                    new EpisodeHistory
+                    {
+                        DownloadId = "35238",
+                        SourceTitle = @"C:\DropFolder\TV Series\TV Series - S01E01.mkv",
+                        SeriesId = 5,
+                        EpisodeId = 4,
+                        EventType = EpisodeHistoryEventType.DownloadFolderImported
+                    }
+                });
+
+            var client = new DownloadClientDefinition
+            {
+                Id = 1,
+                Protocol = DownloadProtocol.Torrent
+            };
+
+            var item = new DownloadClientItem
+            {
+                Title = "The torrent release folder",
+                DownloadId = "35238",
+                DownloadClientInfo = new DownloadClientItemClientInfo
+                {
+                    Protocol = client.Protocol,
+                    Id = client.Id,
+                    Name = client.Name
+                }
+            };
+
+            var trackedDownload = Subject.TrackDownload(client, item);
+
+            trackedDownload.RemoteEpisode.Should().BeNull();
+        }
+
+        [Test]
         public void should_set_indexer()
         {
             var episodeHistory = new EpisodeHistory()

@@ -132,8 +132,11 @@ namespace NzbDrone.Core.Download.TrackedDownloads
 
                 if (historyItems.Any())
                 {
-                    var firstHistoryItem = historyItems.First();
                     var grabbedEvent = historyItems.FirstOrDefault(v => v.EventType == EpisodeHistoryEventType.Grabbed);
+                    var grabbedEpisodeIds = historyItems.Where(v => v.EventType == EpisodeHistoryEventType.Grabbed)
+                        .Select(h => h.EpisodeId)
+                        .Distinct()
+                        .ToList();
 
                     trackedDownload.Indexer = grabbedEvent?.Data?.GetValueOrDefault("indexer");
                     trackedDownload.Added = grabbedEvent?.Date;
@@ -144,15 +147,16 @@ namespace NzbDrone.Core.Download.TrackedDownloads
                     {
                         // Try parsing the original source title and if that fails, try parsing it as a special
                         // TODO: Pass the TVDB ID and TVRage IDs in as well so we have a better chance for finding the item
-                        parsedEpisodeInfo = Parser.Parser.ParseTitle(firstHistoryItem.SourceTitle) ??
-                                            _parsingService.ParseSpecialEpisodeTitle(parsedEpisodeInfo, firstHistoryItem.SourceTitle, 0, 0, null);
+                        parsedEpisodeInfo = grabbedEvent != null
+                            ? Parser.Parser.ParseTitle(grabbedEvent.SourceTitle) ??
+                              _parsingService.ParseSpecialEpisodeTitle(parsedEpisodeInfo, grabbedEvent.SourceTitle, 0, 0, null)
+                            : null;
 
                         if (parsedEpisodeInfo != null)
                         {
                             trackedDownload.RemoteEpisode = _parsingService.Map(parsedEpisodeInfo,
-                                firstHistoryItem.SeriesId,
-                                historyItems.Where(v => v.EventType == EpisodeHistoryEventType.Grabbed)
-                                    .Select(h => h.EpisodeId).Distinct());
+                                grabbedEvent.SeriesId,
+                                grabbedEpisodeIds);
                         }
                         else if (grabbedEvent != null)
                         {
@@ -161,13 +165,12 @@ namespace NzbDrone.Core.Download.TrackedDownloads
                             trackedDownload.RemoteEpisode = _parsingService.Map(
                                 new ParsedEpisodeInfo
                                 {
-                                    ReleaseTitle = firstHistoryItem.SourceTitle,
-                                    Languages = LanguageParser.ParseLanguages(firstHistoryItem.SourceTitle),
-                                    Quality = QualityParser.ParseQuality(firstHistoryItem.SourceTitle)
+                                    ReleaseTitle = grabbedEvent.SourceTitle,
+                                    Languages = LanguageParser.ParseLanguages(grabbedEvent.SourceTitle),
+                                    Quality = QualityParser.ParseQuality(grabbedEvent.SourceTitle)
                                 },
-                                firstHistoryItem.SeriesId,
-                                historyItems.Where(v => v.EventType == EpisodeHistoryEventType.Grabbed)
-                                    .Select(h => h.EpisodeId).Distinct());
+                                grabbedEvent.SeriesId,
+                                grabbedEpisodeIds);
                         }
                     }
 

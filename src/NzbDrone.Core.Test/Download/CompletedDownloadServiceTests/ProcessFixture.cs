@@ -179,6 +179,39 @@ namespace NzbDrone.Core.Test.Download.CompletedDownloadServiceTests
             AssertNotReadyToImport();
         }
 
+        [Test]
+        public void should_process_badly_named_completed_download_when_grab_history_identifies_series()
+        {
+            _trackedDownload.DownloadItem.DownloadId = "grimgar-pack";
+            _trackedDownload.DownloadItem.Title = "[Datte13] Grimgar of Fantasy and Ash [BD 1080p Hi10] [Dual-Audio FLAC]";
+
+            var grabbedHistory = new EpisodeHistory
+            {
+                DownloadId = "grimgar-pack",
+                SourceTitle = "[Datte13] Grimgar of Fantasy and Ash [BD 1080p Hi10] [Dual-Audio FLAC]",
+                SeriesId = 44,
+                EventType = EpisodeHistoryEventType.Grabbed
+            };
+            grabbedHistory.Data.Add(EpisodeHistory.SERIES_MATCH_TYPE, SeriesMatchType.Alias.ToString());
+            grabbedHistory.Data.Add(EpisodeHistory.RELEASE_SOURCE, ReleaseSourceType.UserInvokedSearch.ToString());
+
+            Mocker.GetMock<IHistoryService>()
+                  .Setup(s => s.FindByDownloadId("grimgar-pack"))
+                  .Returns(new List<EpisodeHistory> { grabbedHistory });
+
+            Mocker.GetMock<IParsingService>()
+                  .Setup(s => s.GetSeries(It.IsAny<string>()))
+                  .Returns((Series)null);
+
+            Mocker.GetMock<ISeriesService>()
+                  .Setup(s => s.GetSeries(44))
+                  .Returns(_trackedDownload.RemoteEpisode.Series);
+
+            Subject.Check(_trackedDownload);
+
+            AssertReadyToImport();
+        }
+
         private void AssertNotReadyToImport()
         {
             _trackedDownload.State.Should().NotBe(TrackedDownloadState.ImportPending);
