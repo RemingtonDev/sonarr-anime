@@ -17,6 +17,7 @@ function About() {
 
   const {
     version,
+    releaseVersion,
     packageVersion,
     packageAuthor,
     isNetCore,
@@ -31,6 +32,8 @@ function About() {
     startTime,
   } = item;
 
+  const displayedVersion = releaseVersion || version;
+
   useEffect(() => {
     dispatch(fetchStatus());
   }, [dispatch]);
@@ -42,12 +45,15 @@ function About() {
           title="Fork"
           data={
             <InlineMarkdown
-              data={`sonarr-anime running, build \`${version}\` · [RemingtonDev/sonarr-anime](https://github.com/RemingtonDev/sonarr-anime)`}
+              data={`sonarr-anime running, build \`${displayedVersion}\` · [RemingtonDev/sonarr-anime](https://github.com/RemingtonDev/sonarr-anime)`}
             />
           }
         />
 
-        <DescriptionListItem title={translate('Version')} data={version} />
+        <DescriptionListItem
+          title={translate('Version')}
+          data={displayedVersion}
+        />
 
         {packageVersion && (
           <DescriptionListItem

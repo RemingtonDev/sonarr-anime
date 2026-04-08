@@ -89,7 +89,8 @@ namespace Sonarr.Api.V3.System
                 PackageVersion = _deploymentInfoProvider.PackageVersion,
                 PackageAuthor = _deploymentInfoProvider.PackageAuthor,
                 PackageUpdateMechanism = _deploymentInfoProvider.PackageUpdateMechanism,
-                PackageUpdateMechanismMessage = _deploymentInfoProvider.PackageUpdateMechanismMessage
+                PackageUpdateMechanismMessage = _deploymentInfoProvider.PackageUpdateMechanismMessage,
+                ReleaseVersion = _deploymentInfoProvider.ReleaseVersion
             };
         }
 

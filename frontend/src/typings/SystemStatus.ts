@@ -24,6 +24,7 @@ interface SystemStatus {
   packageUpdateMechanism: string;
   packageUpdateMechanismMessage: string;
   packageVersion: string;
+  releaseVersion: string;
   runtimeName: string;
   runtimeVersion: string;
   sqliteVersion: string;

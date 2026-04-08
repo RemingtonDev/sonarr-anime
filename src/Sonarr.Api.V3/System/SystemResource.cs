@@ -38,6 +38,7 @@ namespace Sonarr.Api.V3.System
         public string PackageAuthor { get; set; }
         public UpdateMechanism PackageUpdateMechanism { get; set; }
         public string PackageUpdateMechanismMessage { get; set; }
+        public string ReleaseVersion { get; set; }
         public Version DatabaseVersion { get; set; }
         public DatabaseType DatabaseType { get; set; }
     }
