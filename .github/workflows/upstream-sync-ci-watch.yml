@@ -1,0 +1,68 @@
+name: Upstream Sync CI Watch
+
+on:
+  workflow_run:
+    workflows: ["Build"]
+    types:
+      - completed
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+
+jobs:
+  report_sync_pr_failure:
+    if: >
+      github.event.workflow_run.conclusion == 'failure' &&
+      startsWith(github.event.workflow_run.head_branch, 'automation/upstream-sync/')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Require Sync Bot Token
+        env:
+          SYNC_BOT_TOKEN: ${{ secrets.SYNC_BOT_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${SYNC_BOT_TOKEN}" ]]; then
+            echo "Missing required repository secret: SYNC_BOT_TOKEN" >&2
+            exit 1
+          fi
+
+      - name: Open Or Update Blocking Issue
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_BOT_TOKEN }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pr_url="$(jq -r '.workflow_run.pull_requests[0].html_url // ""' "$GITHUB_EVENT_PATH")"
+
+          issue_title="Upstream sync blocked"
+          issue_body="$(cat <<EOF
+          The upstream sync PR branch is open, but CI is failing.
+
+          - Sync branch: \`${HEAD_BRANCH}\`
+          - Pull request: ${pr_url:-not available}
+          - Failed workflow run: ${RUN_URL}
+
+          Next step: inspect the failing checks on the sync PR, fix the fork delta if needed, then refresh \`.fork/patches\`.
+          EOF
+          )"
+
+          issue_number="$(gh issue list \
+            --state open \
+            --search "in:title \"${issue_title}\"" \
+            --json number \
+            --jq '.[0].number // empty')"
+
+          if [[ -n "${issue_number}" ]]; then
+            gh issue edit "${issue_number}" --title "${issue_title}" --body "${issue_body}"
+          else
+            gh issue create \
+              --title "${issue_title}" \
+              --body "${issue_body}"
+          fi

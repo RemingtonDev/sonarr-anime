@@ -1,0 +1,1549 @@
+diff --git a/src/NzbDrone.Core/Datastore/Migration/Framework/MigrationController.cs b/src/NzbDrone.Core/Datastore/Migration/Framework/MigrationController.cs
+index 992f2a26fc6859214dd29fa20f677aa22ce8cd86..c6350f20e272aae29fbbed0239a064638af85f4b 100644
+--- a/src/NzbDrone.Core/Datastore/Migration/Framework/MigrationController.cs
++++ b/src/NzbDrone.Core/Datastore/Migration/Framework/MigrationController.cs
+@@ -8,7 +8,6 @@
+ using Microsoft.Extensions.DependencyInjection;
+ using Microsoft.Extensions.Logging;
+ using NLog;
+-using NLog.Extensions.Logging;
+ 
+ namespace NzbDrone.Core.Datastore.Migration.Framework
+ {
+@@ -35,12 +34,14 @@ public void Migrate(string connectionString, MigrationContext migrationContext,
+ 
+             _logger.Info("*** Migrating {0} ***", connectionString);
+ 
+-            ServiceProvider serviceProvider;
+-
+             var db = databaseType == DatabaseType.SQLite ? "sqlite" : "postgres";
+ 
+-            serviceProvider = new ServiceCollection()
+-                .AddLogging(b => b.AddNLog())
++            using var serviceProvider = new ServiceCollection()
++                .AddLogging(b =>
++                {
++                    b.ClearProviders();
++                    b.AddProvider(_migrationLoggerProvider);
++                })
+                 .AddFluentMigratorCore()
+                 .Configure<RunnerOptions>(cfg => cfg.IncludeUntaggedMaintenances = true)
+                 .ConfigureRunner(
+diff --git a/src/NzbDrone.Core/DecisionEngine/DownloadDecisionMaker.cs b/src/NzbDrone.Core/DecisionEngine/DownloadDecisionMaker.cs
+old mode 100644
+new mode 100755
+index aac270bcf99b91d99d00dbb18659fb1cbc9eae70..2f8588d6fd3190ed8d38fe63b63f4508d1edfe70
+--- a/src/NzbDrone.Core/DecisionEngine/DownloadDecisionMaker.cs
++++ b/src/NzbDrone.Core/DecisionEngine/DownloadDecisionMaker.cs
+@@ -1,6 +1,7 @@
+ using System;
+ using System.Collections.Generic;
+ using System.Linq;
++using System.Text.RegularExpressions;
+ using NLog;
+ using NzbDrone.Common.Extensions;
+ using NzbDrone.Common.Instrumentation.Extensions;
+@@ -12,6 +13,7 @@
+ using NzbDrone.Core.IndexerSearch.Definitions;
+ using NzbDrone.Core.Parser;
+ using NzbDrone.Core.Parser.Model;
++using NzbDrone.Core.Tv;
+ 
+ namespace NzbDrone.Core.DecisionEngine
+ {
+@@ -23,6 +25,39 @@ public interface IMakeDownloadDecision
+ 
+     public class DownloadDecisionMaker : IMakeDownloadDecision
+     {
++        private const string SafeToken =
++            @"(?:" +
++            @"Multi[\s-]?Dual[\s-]?Audio|Dual[\s-]?Audio|Multi[\s-]?Audio|Multi[\s-]?Subs?|Eng(?:lish)?[\s-]?Subs?" +
++            @"|10[\s-]?bit|Hi10[Pp]?" +
++            @"|Blu[\s-]?Ray|WEB[\s-]?(?:DL|Rip)|DVD[\s-]?Rip|BD[\s-]?Rip" +
++            @"|[0-9]{3,4}[piPI]|4[Kk]" +
++            @"|DVD|BD|WEB|HDTV" +
++            @"|[xX]\.?26[45]|HEVC|AVC|AV1|VP9" +
++            @"|AAC|OPUS|FLAC|AC3|DTS|MP3|TrueHD|Atmos" +
++            @"|MKV|MP4|AVI" +
++            @"|Batch|Complete" +
++            @")";
++
++        private static readonly Regex LeadingSubgroupRegex = new Regex(@"^\[.+?\][-_. ]*", RegexOptions.Compiled);
++        private static readonly Regex TrailingBracketsRegex = new Regex(@"(?:\s*[\[\(][^\[\]()]*[\]\)])+\s*$", RegexOptions.Compiled);
++        private static readonly Regex SpecialContentRegex = new Regex(@"\b(Movie|OVA|OVD|Special|Extras|NCED|NCOP|Bonus)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
++        private static readonly Regex SingleBlockRegex = new Regex(@"[\[\(]\s*([^\[\]()]+?)\s*[\]\)]", RegexOptions.Compiled);
++        private static readonly Regex SafeBlockContentRegex = new Regex(
++            @"^" + SafeToken + @"(?:[\s-]+" + SafeToken + @")*$",
++            RegexOptions.IgnoreCase | RegexOptions.Compiled);
++        private static readonly Regex YearBlockRegex = new Regex(@"^\d{4}$", RegexOptions.Compiled);
++
++        private static readonly Regex AnimeSpecialKeywordRegex = new Regex(
++            @"\b(OVA|OAV|Special|Specials)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
++        private static readonly Regex NonEpisodeMarkerRegex = new Regex(
++            @"\b(Extras|NCOP|NCED|Menu|Bonus)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
++        private static readonly Regex TrailingSeparatorsRegex = new Regex(
++            @"[\s+\-_]+$", RegexOptions.Compiled);
++        private static readonly Regex TrailingGroupSuffixRegex = new Regex(
++            @"(?<=[\]\)])[-_]\w+$", RegexOptions.Compiled);
++        private static readonly Regex InlineParenBlockRegex = new Regex(
++            @"\([^)]+\)", RegexOptions.Compiled);
++
+         private readonly IEnumerable<IDownloadDecisionEngineSpecification> _specifications;
+         private readonly IParsingService _parsingService;
+         private readonly ICustomFormatCalculationService _formatCalculator;
+@@ -88,6 +123,30 @@ private IEnumerable<DownloadDecision> GetDecisions(List<ReleaseInfo> reports, bo
+                         }
+                     }
+ 
++                    // Anime season search fallback: bare-title packs (no episode markers)
++                    if (searchCriteria is AnimeSeasonSearchCriteria animeSeasonCriteria &&
++                        (parsedEpisodeInfo == null || parsedEpisodeInfo.SeriesTitle.IsNullOrWhiteSpace()))
++                    {
++                        var syntheticInfo = TryBuildAnimeSeasonPackInfo(report, animeSeasonCriteria);
++
++                        if (syntheticInfo != null)
++                        {
++                            parsedEpisodeInfo = syntheticInfo;
++                        }
++                    }
++
++                    // Anime special search fallback: OVA/Special releases for a single requested special
++                    if (searchCriteria is SpecialEpisodeSearchCriteria specialCriteria &&
++                        (parsedEpisodeInfo == null || parsedEpisodeInfo.SeriesTitle.IsNullOrWhiteSpace()))
++                    {
++                        var syntheticInfo = TryBuildAnimeSpecialInfo(report, specialCriteria);
++
++                        if (syntheticInfo != null)
++                        {
++                            parsedEpisodeInfo = syntheticInfo;
++                        }
++                    }
++
+                     if (parsedEpisodeInfo != null && !parsedEpisodeInfo.SeriesTitle.IsNullOrWhiteSpace())
+                     {
+                         var remoteEpisode = _parsingService.Map(parsedEpisodeInfo, report.TvdbId, report.TvRageId, report.ImdbId, searchCriteria);
+@@ -234,5 +293,239 @@ private DownloadRejection EvaluateSpec(IDownloadDecisionEngineSpecification spec
+ 
+             return null;
+         }
++
++        private ParsedEpisodeInfo TryBuildAnimeSeasonPackInfo(ReleaseInfo report, AnimeSeasonSearchCriteria criteria)
++        {
++            // Season 0 is specials — never treat bare-title packs as season 0 packs
++            if (criteria.SeasonNumber == 0)
++            {
++                return null;
++            }
++
++            // Strip leading [SubGroup]
++            var stripped = LeadingSubgroupRegex.Replace(report.Title, "");
++            stripped = stripped.Trim();
++
++            if (stripped.IsNullOrWhiteSpace())
++            {
++                return null;
++            }
++
++            // Require at least one trailing bracket/paren block with safe metadata
++            var blockMatch = TrailingBracketsRegex.Match(stripped);
++            if (!blockMatch.Success)
++            {
++                return null;
++            }
++
++            var titlePart = stripped.Substring(0, blockMatch.Index).Trim();
++            var blocks = SingleBlockRegex.Matches(blockMatch.Value);
++
++            if (blocks.Count == 0)
++            {
++                return null;
++            }
++
++            foreach (Match block in blocks)
++            {
++                var blockValue = block.Groups[1].Value;
++
++                if (!SafeBlockContentRegex.IsMatch(blockValue) && !YearBlockRegex.IsMatch(blockValue))
++                {
++                    return null;
++                }
++            }
++
++            if (titlePart.IsNullOrWhiteSpace())
++            {
++                return null;
++            }
++
++            // Reject titles containing special-content keywords
++            if (SpecialContentRegex.IsMatch(titlePart))
++            {
++                return null;
++            }
++
++            // Verify IDs don't contradict the searched series
++            if (report.TvdbId > 0 && criteria.Series.TvdbId > 0 && report.TvdbId != criteria.Series.TvdbId)
++            {
++                return null;
++            }
++
++            if (report.TvRageId > 0 && criteria.Series.TvRageId > 0 && report.TvRageId != criteria.Series.TvRageId)
++            {
++                return null;
++            }
++
++            if (report.ImdbId.IsNotNullOrWhiteSpace() && criteria.Series.ImdbId.IsNotNullOrWhiteSpace() &&
++                report.ImdbId != criteria.Series.ImdbId)
++            {
++                return null;
++            }
++
++            // Exact cleaned-title match against series title or scene titles
++            var cleanedNormalized = titlePart.CleanSeriesTitle();
++            var seriesClean = criteria.Series.Title.CleanSeriesTitle();
++
++            var matched = cleanedNormalized == seriesClean;
++
++            if (!matched && criteria.SceneTitles != null)
++            {
++                matched = criteria.SceneTitles.Any(st => st.CleanSeriesTitle() == cleanedNormalized);
++            }
++
++            if (!matched)
++            {
++                var withoutParens = InlineParenBlockRegex.Replace(titlePart, "");
++                withoutParens = TrailingSeparatorsRegex.Replace(withoutParens, "");
++                withoutParens = withoutParens.Trim();
++
++                if (!withoutParens.IsNullOrWhiteSpace())
++                {
++                    cleanedNormalized = withoutParens.CleanSeriesTitle();
++                    matched = cleanedNormalized == seriesClean;
++
++                    if (!matched && criteria.SceneTitles != null)
++                    {
++                        matched = criteria.SceneTitles.Any(st => st.CleanSeriesTitle() == cleanedNormalized);
++                    }
++                }
++            }
++
++            if (!matched)
++            {
++                return null;
++            }
++
++            _logger.Debug(
++                "Anime season search fallback: treating '{0}' as season {1} pack for '{2}'",
++                report.Title,
++                criteria.SeasonNumber,
++                criteria.Series.Title);
++
++            return new ParsedEpisodeInfo
++            {
++                ReleaseTitle = report.Title,
++                SeriesTitle = criteria.Series.Title,
++                SeasonNumber = criteria.SeasonNumber,
++                FullSeason = true,
++                EpisodeNumbers = Array.Empty<int>(),
++                AbsoluteEpisodeNumbers = Array.Empty<int>(),
++                Languages = LanguageParser.ParseLanguages(report.Title),
++                Quality = QualityParser.ParseQuality(report.Title)
++            };
++        }
++
++        private ParsedEpisodeInfo TryBuildAnimeSpecialInfo(ReleaseInfo report, SpecialEpisodeSearchCriteria criteria)
++        {
++            // Only for anime series searching for exactly one special episode
++            if (criteria.Series?.SeriesType != SeriesTypes.Anime)
++            {
++                return null;
++            }
++
++            if (criteria.Episodes == null || criteria.Episodes.Count != 1)
++            {
++                return null;
++            }
++
++            var episode = criteria.Episodes[0];
++
++            if (episode.SeasonNumber != 0)
++            {
++                return null;
++            }
++
++            // Must contain OVA/OAV/Special/Specials keyword
++            if (!AnimeSpecialKeywordRegex.IsMatch(report.Title))
++            {
++                return null;
++            }
++
++            // Reject non-episode markers (Extras, NCOP, NCED, Menu, Bonus)
++            if (NonEpisodeMarkerRegex.IsMatch(report.Title))
++            {
++                return null;
++            }
++
++            // Extract series title: strip [SubGroup], trailing group suffix, bracket blocks, and special keywords
++            var stripped = LeadingSubgroupRegex.Replace(report.Title, "").Trim();
++
++            if (stripped.IsNullOrWhiteSpace())
++            {
++                return null;
++            }
++
++            // Strip trailing release-group suffix after final bracket (e.g. "_Rokey", "-Group")
++            stripped = TrailingGroupSuffixRegex.Replace(stripped, "");
++
++            var blockMatch = TrailingBracketsRegex.Match(stripped);
++            var titlePart = blockMatch.Success
++                ? stripped.Substring(0, blockMatch.Index).Trim()
++                : stripped;
++
++            // Remove OVA/Special keywords and clean up separators
++            titlePart = AnimeSpecialKeywordRegex.Replace(titlePart, "");
++            titlePart = TrailingSeparatorsRegex.Replace(titlePart, "");
++            titlePart = titlePart.Trim();
++
++            if (titlePart.IsNullOrWhiteSpace())
++            {
++                return null;
++            }
++
++            // Exact cleaned-title match against series title or scene titles
++            var cleanedNormalized = titlePart.CleanSeriesTitle();
++            var seriesClean = criteria.Series.Title.CleanSeriesTitle();
++
++            var matched = cleanedNormalized == seriesClean;
++
++            if (!matched && criteria.SceneTitles != null)
++            {
++                matched = criteria.SceneTitles.Any(st => st.CleanSeriesTitle() == cleanedNormalized);
++            }
++
++            // Second pass: remove inline parenthesized alt-title blocks and retry
++            if (!matched)
++            {
++                var withoutParens = InlineParenBlockRegex.Replace(titlePart, "");
++                withoutParens = TrailingSeparatorsRegex.Replace(withoutParens, "");
++                withoutParens = withoutParens.Trim();
++
++                if (!withoutParens.IsNullOrWhiteSpace())
++                {
++                    cleanedNormalized = withoutParens.CleanSeriesTitle();
++                    matched = cleanedNormalized == seriesClean;
++
++                    if (!matched && criteria.SceneTitles != null)
++                    {
++                        matched = criteria.SceneTitles.Any(st => st.CleanSeriesTitle() == cleanedNormalized);
++                    }
++                }
++            }
++
++            if (!matched)
++            {
++                return null;
++            }
++
++            _logger.Debug(
++                "Anime special search fallback: treating '{0}' as S00E{1:00} for '{2}'",
++                report.Title,
++                episode.EpisodeNumber,
++                criteria.Series.Title);
++
++            return new ParsedEpisodeInfo
++            {
++                ReleaseTitle = report.Title,
++                SeriesTitle = criteria.Series.Title,
++                SeasonNumber = 0,
++                EpisodeNumbers = new[] { episode.EpisodeNumber },
++                AbsoluteEpisodeNumbers = Array.Empty<int>(),
++                Languages = LanguageParser.ParseLanguages(report.Title),
++                Quality = QualityParser.ParseQuality(report.Title)
++            };
++        }
+     }
+ }
+diff --git a/src/NzbDrone.Core/DecisionEngine/Specifications/MultiSeasonSpecification.cs b/src/NzbDrone.Core/DecisionEngine/Specifications/MultiSeasonSpecification.cs
+index ba117324a97d1df03e95dff5eef381417b200582..17751961d5a5d508ca4a0d48cc9ea43b33025d6c 100644
+--- a/src/NzbDrone.Core/DecisionEngine/Specifications/MultiSeasonSpecification.cs
++++ b/src/NzbDrone.Core/DecisionEngine/Specifications/MultiSeasonSpecification.cs
+@@ -1,6 +1,8 @@
+-﻿using NLog;
++﻿using System.Linq;
++using NLog;
+ using NzbDrone.Core.IndexerSearch.Definitions;
+ using NzbDrone.Core.Parser.Model;
++using NzbDrone.Core.Tv;
+ 
+ namespace NzbDrone.Core.DecisionEngine.Specifications
+ {
+@@ -20,6 +22,21 @@ public virtual DownloadSpecDecision IsSatisfiedBy(RemoteEpisode subject, SearchC
+         {
+             if (subject.ParsedEpisodeInfo.IsMultiSeason)
+             {
++                // Allow anime multi-season packs during anime season search, but only if the pack covers the searched season
++                if (subject.Series.SeriesType == SeriesTypes.Anime &&
++                    searchCriteria is AnimeSeasonSearchCriteria animeSeasonCriteria)
++                {
++                    if (subject.ParsedEpisodeInfo.SeasonNumbers.Length > 0 &&
++                        !subject.ParsedEpisodeInfo.SeasonNumbers.Contains(animeSeasonCriteria.SeasonNumber))
++                    {
++                        _logger.Debug("Anime multi-season pack does not cover searched season {0}, skipping.", animeSeasonCriteria.SeasonNumber);
++                        return DownloadSpecDecision.Reject(DownloadRejectionReason.WrongSeason, "Wrong season");
++                    }
++
++                    _logger.Debug("Anime multi-season release {0} accepted for anime season search", subject.Release.Title);
++                    return DownloadSpecDecision.Accept();
++                }
++
+                 _logger.Debug("Multi-season release {0} rejected. Not supported", subject.Release.Title);
+                 return DownloadSpecDecision.Reject(DownloadRejectionReason.MultiSeason, "Multi-season releases are not supported");
+             }
+diff --git a/src/NzbDrone.Core/Download/TrackedDownloads/TrackedDownloadService.cs b/src/NzbDrone.Core/Download/TrackedDownloads/TrackedDownloadService.cs
+index cc54dc1cb72df8097176d88b7a3ee2e548c31c29..6b171b9e02cdde2ff1294ddf3e0d832609cd8bb0 100644
+--- a/src/NzbDrone.Core/Download/TrackedDownloads/TrackedDownloadService.cs
++++ b/src/NzbDrone.Core/Download/TrackedDownloads/TrackedDownloadService.cs
+@@ -132,8 +132,11 @@ public TrackedDownload TrackDownload(DownloadClientDefinition downloadClient, Do
+ 
+                 if (historyItems.Any())
+                 {
+-                    var firstHistoryItem = historyItems.First();
+                     var grabbedEvent = historyItems.FirstOrDefault(v => v.EventType == EpisodeHistoryEventType.Grabbed);
++                    var grabbedEpisodeIds = historyItems.Where(v => v.EventType == EpisodeHistoryEventType.Grabbed)
++                        .Select(h => h.EpisodeId)
++                        .Distinct()
++                        .ToList();
+ 
+                     trackedDownload.Indexer = grabbedEvent?.Data?.GetValueOrDefault("indexer");
+                     trackedDownload.Added = grabbedEvent?.Date;
+@@ -144,15 +147,30 @@ public TrackedDownload TrackDownload(DownloadClientDefinition downloadClient, Do
+                     {
+                         // Try parsing the original source title and if that fails, try parsing it as a special
+                         // TODO: Pass the TVDB ID and TVRage IDs in as well so we have a better chance for finding the item
+-                        parsedEpisodeInfo = Parser.Parser.ParseTitle(firstHistoryItem.SourceTitle) ??
+-                                            _parsingService.ParseSpecialEpisodeTitle(parsedEpisodeInfo, firstHistoryItem.SourceTitle, 0, 0, null);
++                        parsedEpisodeInfo = grabbedEvent != null
++                            ? Parser.Parser.ParseTitle(grabbedEvent.SourceTitle) ??
++                              _parsingService.ParseSpecialEpisodeTitle(parsedEpisodeInfo, grabbedEvent.SourceTitle, 0, 0, null)
++                            : null;
+ 
+                         if (parsedEpisodeInfo != null)
+                         {
+                             trackedDownload.RemoteEpisode = _parsingService.Map(parsedEpisodeInfo,
+-                                firstHistoryItem.SeriesId,
+-                                historyItems.Where(v => v.EventType == EpisodeHistoryEventType.Grabbed)
+-                                    .Select(h => h.EpisodeId).Distinct());
++                                grabbedEvent.SeriesId,
++                                grabbedEpisodeIds);
++                        }
++                        else if (grabbedEvent != null)
++                        {
++                            _logger.Debug("Unable to parse download title '{0}', using grab history to build episode info", trackedDownload.DownloadItem.Title);
++
++                            trackedDownload.RemoteEpisode = _parsingService.Map(
++                                new ParsedEpisodeInfo
++                                {
++                                    ReleaseTitle = grabbedEvent.SourceTitle,
++                                    Languages = LanguageParser.ParseLanguages(grabbedEvent.SourceTitle),
++                                    Quality = QualityParser.ParseQuality(grabbedEvent.SourceTitle)
++                                },
++                                grabbedEvent.SeriesId,
++                                grabbedEpisodeIds);
+                         }
+                     }
+ 
+diff --git a/src/NzbDrone.Core/ImportLists/Sonarr/SonarrAPIResource.cs b/src/NzbDrone.Core/ImportLists/Sonarr/SonarrAPIResource.cs
+deleted file mode 100644
+index 36396462607dc1a9d9f212b19623f114db0d1103..0000000000000000000000000000000000000000
+--- a/src/NzbDrone.Core/ImportLists/Sonarr/SonarrAPIResource.cs
++++ /dev/null
+@@ -1,45 +0,0 @@
+-using System.Collections.Generic;
+-
+-namespace NzbDrone.Core.ImportLists.Sonarr
+-{
+-    public class SonarrSeries
+-    {
+-        public string Title { get; set; }
+-        public string SortTitle { get; set; }
+-        public int TvdbId { get; set; }
+-        public string Overview { get; set; }
+-        public List<MediaCover.MediaCover> Images { get; set; }
+-        public bool Monitored { get; set; }
+-        public int Year { get; set; }
+-        public string TitleSlug { get; set; }
+-        public int QualityProfileId { get; set; }
+-        public int LanguageProfileId { get; set; }
+-        public string RootFolderPath { get; set; }
+-        public List<SonarrSeason> Seasons { get; set; }
+-        public HashSet<int> Tags { get; set; }
+-    }
+-
+-    public class SonarrProfile
+-    {
+-        public string Name { get; set; }
+-        public int Id { get; set; }
+-    }
+-
+-    public class SonarrTag
+-    {
+-        public string Label { get; set; }
+-        public int Id { get; set; }
+-    }
+-
+-    public class SonarrRootFolder
+-    {
+-        public string Path { get; set; }
+-        public int Id { get; set; }
+-    }
+-
+-    public class SonarrSeason
+-    {
+-        public int SeasonNumber { get; set; }
+-        public bool Monitored { get; set; }
+-    }
+-}
+diff --git a/src/NzbDrone.Core/ImportLists/Sonarr/SonarrImport.cs b/src/NzbDrone.Core/ImportLists/Sonarr/SonarrImport.cs
+deleted file mode 100644
+index d06b294f2c28b22e191581a37872c1207bb1197d..0000000000000000000000000000000000000000
+--- a/src/NzbDrone.Core/ImportLists/Sonarr/SonarrImport.cs
++++ /dev/null
+@@ -1,177 +0,0 @@
+-using System;
+-using System.Collections.Generic;
+-using System.Linq;
+-using FluentValidation.Results;
+-using NLog;
+-using NzbDrone.Common.Extensions;
+-using NzbDrone.Core.Configuration;
+-using NzbDrone.Core.Localization;
+-using NzbDrone.Core.Parser;
+-using NzbDrone.Core.Parser.Model;
+-using NzbDrone.Core.Tv;
+-using NzbDrone.Core.Validation;
+-
+-namespace NzbDrone.Core.ImportLists.Sonarr
+-{
+-    public class SonarrImport : ImportListBase<SonarrSettings>
+-    {
+-        private readonly ISonarrV3Proxy _sonarrV3Proxy;
+-        public override string Name => "Sonarr";
+-
+-        public override ImportListType ListType => ImportListType.Program;
+-        public override TimeSpan MinRefreshInterval => TimeSpan.FromMinutes(5);
+-
+-        public SonarrImport(ISonarrV3Proxy sonarrV3Proxy,
+-                            IImportListStatusService importListStatusService,
+-                            IConfigService configService,
+-                            IParsingService parsingService,
+-                            ILocalizationService localizationService,
+-                            Logger logger)
+-            : base(importListStatusService, configService, parsingService, localizationService, logger)
+-        {
+-            _sonarrV3Proxy = sonarrV3Proxy;
+-        }
+-
+-        public override ImportListFetchResult Fetch()
+-        {
+-            var series = new List<ImportListItemInfo>();
+-            var anyFailure = false;
+-            try
+-            {
+-                var remoteSeries = _sonarrV3Proxy.GetSeries(Settings);
+-
+-                foreach (var item in remoteSeries)
+-                {
+-                    if (Settings.ProfileIds.Any() && !Settings.ProfileIds.Contains(item.QualityProfileId))
+-                    {
+-                        continue;
+-                    }
+-
+-                    if (Settings.LanguageProfileIds.Any() && !Settings.LanguageProfileIds.Contains(item.LanguageProfileId))
+-                    {
+-                        continue;
+-                    }
+-
+-                    if (Settings.TagIds.Any() && !Settings.TagIds.Any(tagId => item.Tags.Any(itemTagId => itemTagId == tagId)))
+-                    {
+-                        continue;
+-                    }
+-
+-                    if (Settings.RootFolderPaths.Any() && !Settings.RootFolderPaths.Any(rootFolderPath => item.RootFolderPath.ContainsIgnoreCase(rootFolderPath)))
+-                    {
+-                        continue;
+-                    }
+-
+-                    var info = new ImportListItemInfo
+-                    {
+-                        TvdbId = item.TvdbId,
+-                        Title = item.Title
+-                    };
+-
+-                    if (Settings.SyncSeasonMonitoring)
+-                    {
+-                        info.Seasons = item.Seasons.Select(s => new Season
+-                        {
+-                            SeasonNumber = s.SeasonNumber,
+-                            Monitored = s.Monitored
+-                        }).ToList();
+-                    }
+-
+-                    series.Add(info);
+-                }
+-
+-                _importListStatusService.RecordSuccess(Definition.Id);
+-            }
+-            catch (Exception ex)
+-            {
+-                _logger.Debug(ex, "Failed to fetch data for list {0} ({1})", Definition.Name, Name);
+-
+-                _importListStatusService.RecordFailure(Definition.Id);
+-                anyFailure = true;
+-            }
+-
+-            return new ImportListFetchResult(CleanupListItems(series), anyFailure);
+-        }
+-
+-        public override object RequestAction(string action, IDictionary<string, string> query)
+-        {
+-            // Return early if there is not an API key
+-            if (Settings.ApiKey.IsNullOrWhiteSpace())
+-            {
+-                return new
+-                {
+-                    devices = new List<object>()
+-                };
+-            }
+-
+-            Settings.Validate().Filter("ApiKey").ThrowOnError();
+-
+-            if (action == "getProfiles")
+-            {
+-                var profiles = _sonarrV3Proxy.GetQualityProfiles(Settings);
+-
+-                return new
+-                {
+-                    options = profiles.OrderBy(d => d.Name, StringComparer.InvariantCultureIgnoreCase)
+-                        .Select(d => new
+-                        {
+-                            value = d.Id,
+-                            name = d.Name
+-                        })
+-                };
+-            }
+-
+-            if (action == "getLanguageProfiles")
+-            {
+-                var langProfiles = _sonarrV3Proxy.GetLanguageProfiles(Settings);
+-
+-                return new
+-                {
+-                    options = langProfiles.OrderBy(d => d.Name, StringComparer.InvariantCultureIgnoreCase)
+-                        .Select(d => new
+-                        {
+-                            value = d.Id,
+-                            name = d.Name
+-                        })
+-                };
+-            }
+-
+-            if (action == "getTags")
+-            {
+-                var tags = _sonarrV3Proxy.GetTags(Settings);
+-
+-                return new
+-                {
+-                    options = tags.OrderBy(d => d.Label, StringComparer.InvariantCultureIgnoreCase)
+-                        .Select(d => new
+-                        {
+-                            value = d.Id,
+-                            name = d.Label
+-                        })
+-                };
+-            }
+-
+-            if (action == "getRootFolders")
+-            {
+-                var remoteRootFolders = _sonarrV3Proxy.GetRootFolders(Settings);
+-
+-                return new
+-                {
+-                    options = remoteRootFolders.OrderBy(d => d.Path, StringComparer.InvariantCultureIgnoreCase)
+-                        .Select(d => new
+-                        {
+-                            value = d.Path,
+-                            name = d.Path
+-                        })
+-                };
+-            }
+-
+-            return new { };
+-        }
+-
+-        protected override void Test(List<ValidationFailure> failures)
+-        {
+-            failures.AddIfNotNull(_sonarrV3Proxy.Test(Settings));
+-        }
+-    }
+-}
+diff --git a/src/NzbDrone.Core/ImportLists/Sonarr/SonarrSettings.cs b/src/NzbDrone.Core/ImportLists/Sonarr/SonarrSettings.cs
+deleted file mode 100644
+index af1bbd0f77aedc6fcf2703ed99b1de86885f0232..0000000000000000000000000000000000000000
+--- a/src/NzbDrone.Core/ImportLists/Sonarr/SonarrSettings.cs
++++ /dev/null
+@@ -1,58 +0,0 @@
+-using System;
+-using System.Collections.Generic;
+-using FluentValidation;
+-using NzbDrone.Core.Annotations;
+-using NzbDrone.Core.Validation;
+-
+-namespace NzbDrone.Core.ImportLists.Sonarr
+-{
+-    public class SonarrSettingsValidator : AbstractValidator<SonarrSettings>
+-    {
+-        public SonarrSettingsValidator()
+-        {
+-            RuleFor(c => c.BaseUrl).ValidRootUrl();
+-            RuleFor(c => c.ApiKey).NotEmpty();
+-        }
+-    }
+-
+-    public class SonarrSettings : ImportListSettingsBase<SonarrSettings>
+-    {
+-        private static readonly SonarrSettingsValidator Validator = new ();
+-
+-        public SonarrSettings()
+-        {
+-            ApiKey = "";
+-            ProfileIds = Array.Empty<int>();
+-            LanguageProfileIds = Array.Empty<int>();
+-            TagIds = Array.Empty<int>();
+-            RootFolderPaths = Array.Empty<string>();
+-        }
+-
+-        [FieldDefinition(0, Label = "ImportListsSonarrSettingsFullUrl", HelpText = "ImportListsSonarrSettingsFullUrlHelpText")]
+-        public override string BaseUrl { get; set; } = string.Empty;
+-
+-        [FieldDefinition(1, Label = "ApiKey", HelpText = "ImportListsSonarrSettingsApiKeyHelpText")]
+-        public string ApiKey { get; set; }
+-
+-        [FieldDefinition(2, Label = "ImportListsSonarrSettingsSyncSeasonMonitoring", HelpText = "ImportListsSonarrSettingsSyncSeasonMonitoringHelpText", Type = FieldType.Checkbox)]
+-        public bool SyncSeasonMonitoring { get; set; }
+-
+-        [FieldDefinition(3, Type = FieldType.Select, SelectOptionsProviderAction = "getProfiles", Label = "QualityProfiles", HelpText = "ImportListsSonarrSettingsQualityProfilesHelpText")]
+-        public IEnumerable<int> ProfileIds { get; set; }
+-
+-        [FieldDefinition(4, Type = FieldType.Select, SelectOptionsProviderAction = "getTags", Label = "Tags", HelpText = "ImportListsSonarrSettingsTagsHelpText")]
+-        public IEnumerable<int> TagIds { get; set; }
+-
+-        [FieldDefinition(5, Type = FieldType.Select, SelectOptionsProviderAction = "getRootFolders", Label = "RootFolders", HelpText = "ImportListsSonarrSettingsRootFoldersHelpText")]
+-        public IEnumerable<string> RootFolderPaths { get; set; }
+-
+-        // TODO: Remove this eventually, no translation added as deprecated
+-        [FieldDefinition(6, Type = FieldType.Select, SelectOptionsProviderAction = "getLanguageProfiles", Label = "Language Profiles", HelpText = "Language Profiles from the source instance to import from")]
+-        public IEnumerable<int> LanguageProfileIds { get; set; }
+-
+-        public override NzbDroneValidationResult Validate()
+-        {
+-            return new NzbDroneValidationResult(Validator.Validate(this));
+-        }
+-    }
+-}
+diff --git a/src/NzbDrone.Core/ImportLists/Sonarr/SonarrV3Proxy.cs b/src/NzbDrone.Core/ImportLists/Sonarr/SonarrV3Proxy.cs
+deleted file mode 100644
+index 2913dae9b16a47bc5bbe16b483708e9c45f41655..0000000000000000000000000000000000000000
+--- a/src/NzbDrone.Core/ImportLists/Sonarr/SonarrV3Proxy.cs
++++ /dev/null
+@@ -1,119 +0,0 @@
+-using System;
+-using System.Collections.Generic;
+-using System.Net;
+-using FluentValidation.Results;
+-using Newtonsoft.Json;
+-using NLog;
+-using NzbDrone.Common.Extensions;
+-using NzbDrone.Common.Http;
+-using NzbDrone.Core.Localization;
+-
+-namespace NzbDrone.Core.ImportLists.Sonarr
+-{
+-    public interface ISonarrV3Proxy
+-    {
+-        List<SonarrSeries> GetSeries(SonarrSettings settings);
+-        List<SonarrProfile> GetQualityProfiles(SonarrSettings settings);
+-        List<SonarrProfile> GetLanguageProfiles(SonarrSettings settings);
+-        List<SonarrRootFolder> GetRootFolders(SonarrSettings settings);
+-        List<SonarrTag> GetTags(SonarrSettings settings);
+-        ValidationFailure Test(SonarrSettings settings);
+-    }
+-
+-    public class SonarrV3Proxy : ISonarrV3Proxy
+-    {
+-        private readonly IHttpClient _httpClient;
+-        private readonly Logger _logger;
+-        private readonly ILocalizationService _localizationService;
+-
+-        public SonarrV3Proxy(IHttpClient httpClient, ILocalizationService localizationService, Logger logger)
+-        {
+-            _httpClient = httpClient;
+-            _localizationService = localizationService;
+-            _logger = logger;
+-        }
+-
+-        public List<SonarrSeries> GetSeries(SonarrSettings settings)
+-        {
+-            return Execute<SonarrSeries>("/api/v3/series", settings);
+-        }
+-
+-        public List<SonarrProfile> GetQualityProfiles(SonarrSettings settings)
+-        {
+-            return Execute<SonarrProfile>("/api/v3/qualityprofile", settings);
+-        }
+-
+-        public List<SonarrProfile> GetLanguageProfiles(SonarrSettings settings)
+-        {
+-            return Execute<SonarrProfile>("/api/v3/languageprofile", settings);
+-        }
+-
+-        public List<SonarrRootFolder> GetRootFolders(SonarrSettings settings)
+-        {
+-            return Execute<SonarrRootFolder>("api/v3/rootfolder", settings);
+-        }
+-
+-        public List<SonarrTag> GetTags(SonarrSettings settings)
+-        {
+-            return Execute<SonarrTag>("/api/v3/tag", settings);
+-        }
+-
+-        public ValidationFailure Test(SonarrSettings settings)
+-        {
+-            try
+-            {
+-                GetSeries(settings);
+-            }
+-            catch (HttpException ex)
+-            {
+-                if (ex.Response.StatusCode == HttpStatusCode.Unauthorized)
+-                {
+-                    _logger.Error(ex, "API Key is invalid");
+-                    return new ValidationFailure("ApiKey", _localizationService.GetLocalizedString("ImportListsValidationInvalidApiKey"));
+-                }
+-
+-                if (ex.Response.HasHttpRedirect)
+-                {
+-                    _logger.Error(ex, "Sonarr returned redirect and is invalid");
+-                    return new ValidationFailure("BaseUrl", _localizationService.GetLocalizedString("ImportListsSonarrValidationInvalidUrl"));
+-                }
+-
+-                _logger.Error(ex, "Unable to connect to import list.");
+-                return new ValidationFailure(string.Empty, _localizationService.GetLocalizedString("ImportListsValidationUnableToConnectException", new Dictionary<string, object> { { "exceptionMessage", ex.Message } }));
+-            }
+-            catch (Exception ex)
+-            {
+-                _logger.Error(ex, "Unable to connect to import list.");
+-                return new ValidationFailure(string.Empty, _localizationService.GetLocalizedString("ImportListsValidationUnableToConnectException", new Dictionary<string, object> { { "exceptionMessage", ex.Message } }));
+-            }
+-
+-            return null;
+-        }
+-
+-        private List<TResource> Execute<TResource>(string resource, SonarrSettings settings)
+-        {
+-            if (settings.BaseUrl.IsNullOrWhiteSpace() || settings.ApiKey.IsNullOrWhiteSpace())
+-            {
+-                return new List<TResource>();
+-            }
+-
+-            var baseUrl = settings.BaseUrl.TrimEnd('/');
+-
+-            var request = new HttpRequestBuilder(baseUrl).Resource(resource)
+-                .Accept(HttpAccept.Json)
+-                .SetHeader("X-Api-Key", settings.ApiKey)
+-                .Build();
+-
+-            var response = _httpClient.Get(request);
+-
+-            if ((int)response.StatusCode >= 300)
+-            {
+-                throw new HttpException(response);
+-            }
+-
+-            var results = JsonConvert.DeserializeObject<List<TResource>>(response.Content);
+-
+-            return results;
+-        }
+-    }
+-}
+diff --git a/src/NzbDrone.Core/IndexerSearch/Definitions/AnimeSeasonSearchCriteria.cs b/src/NzbDrone.Core/IndexerSearch/Definitions/AnimeSeasonSearchCriteria.cs
+index efd510f3dc2d4ae8060044b697e1ecd9177172ac..ac9cc2219d28b4e046e0dda96e6a04058cac7817 100644
+--- a/src/NzbDrone.Core/IndexerSearch/Definitions/AnimeSeasonSearchCriteria.cs
++++ b/src/NzbDrone.Core/IndexerSearch/Definitions/AnimeSeasonSearchCriteria.cs
+@@ -1,9 +1,17 @@
++using System.Collections.Generic;
++
+ namespace NzbDrone.Core.IndexerSearch.Definitions
+ {
+     public class AnimeSeasonSearchCriteria : SearchCriteriaBase
+     {
+         public int SeasonNumber { get; set; }
+ 
++        /// <summary>
++        /// Snapshot of broad title-only queries already emitted earlier in this series search.
++        /// Request generators should treat this as read-only state.
++        /// </summary>
++        public IReadOnlyCollection<string> BroadQueriesEmitted { get; set; }
++
+         public override string ToString()
+         {
+             return $"[{Series.Title} : S{SeasonNumber:00}]";
+diff --git a/src/NzbDrone.Core/IndexerSearch/ReleaseSearchService.cs b/src/NzbDrone.Core/IndexerSearch/ReleaseSearchService.cs
+index 6625015c7e91a26663c1a9e832967ce03fc56674..5725b99234c6b0605d98f8444eddd8cc5d0e5152 100644
+--- a/src/NzbDrone.Core/IndexerSearch/ReleaseSearchService.cs
++++ b/src/NzbDrone.Core/IndexerSearch/ReleaseSearchService.cs
+@@ -23,6 +23,7 @@ public interface ISearchForReleases
+         Task<List<DownloadDecision>> EpisodeSearch(Episode episode, bool userInvokedSearch, bool interactiveSearch);
+         Task<List<DownloadDecision>> SeasonSearch(int seriesId, int seasonNumber, bool missingOnly, bool monitoredOnly, bool userInvokedSearch, bool interactiveSearch);
+         Task<List<DownloadDecision>> SeasonSearch(int seriesId, int seasonNumber, List<Episode> episodes, bool monitoredOnly, bool userInvokedSearch, bool interactiveSearch);
++        Task<List<DownloadDecision>> SeasonSearch(int seriesId, int seasonNumber, bool missingOnly, bool monitoredOnly, bool userInvokedSearch, bool interactiveSearch, HashSet<string> animeBroadQueriesEmitted, HashSet<int> alreadyCoveredEpisodeIds = null);
+     }
+ 
+     public class ReleaseSearchService : ISearchForReleases
+@@ -94,6 +95,11 @@ public async Task<List<DownloadDecision>> EpisodeSearch(Episode episode, bool us
+         }
+ 
+         public async Task<List<DownloadDecision>> SeasonSearch(int seriesId, int seasonNumber, bool missingOnly, bool monitoredOnly, bool userInvokedSearch, bool interactiveSearch)
++        {
++            return await SeasonSearch(seriesId, seasonNumber, missingOnly, monitoredOnly, userInvokedSearch, interactiveSearch, null);
++        }
++
++        public async Task<List<DownloadDecision>> SeasonSearch(int seriesId, int seasonNumber, bool missingOnly, bool monitoredOnly, bool userInvokedSearch, bool interactiveSearch, HashSet<string> animeBroadQueriesEmitted, HashSet<int> alreadyCoveredEpisodeIds = null)
+         {
+             var episodes = _episodeService.GetEpisodesBySeason(seriesId, seasonNumber);
+ 
+@@ -102,16 +108,29 @@ public async Task<List<DownloadDecision>> SeasonSearch(int seriesId, int seasonN
+                 episodes = episodes.Where(e => !e.HasFile).ToList();
+             }
+ 
+-            return await SeasonSearch(seriesId, seasonNumber, episodes, monitoredOnly, userInvokedSearch, interactiveSearch);
++            return await SeasonSearch(seriesId, seasonNumber, episodes, monitoredOnly, userInvokedSearch, interactiveSearch, animeBroadQueriesEmitted, alreadyCoveredEpisodeIds);
+         }
+ 
+         public async Task<List<DownloadDecision>> SeasonSearch(int seriesId, int seasonNumber, List<Episode> episodes, bool monitoredOnly, bool userInvokedSearch, bool interactiveSearch)
++        {
++            return await SeasonSearch(seriesId, seasonNumber, episodes, monitoredOnly, userInvokedSearch, interactiveSearch, null);
++        }
++
++        private async Task<List<DownloadDecision>> SeasonSearch(int seriesId, int seasonNumber, List<Episode> episodes, bool monitoredOnly, bool userInvokedSearch, bool interactiveSearch, HashSet<string> animeBroadQueriesEmitted, HashSet<int> alreadyCoveredEpisodeIds = null)
+         {
+             var series = _seriesService.GetSeries(seriesId);
+ 
+             if (series.SeriesType == SeriesTypes.Anime)
+             {
+-                return await SearchAnimeSeason(series, episodes, monitoredOnly, userInvokedSearch, interactiveSearch);
++                // Season 0 specials use the special search path to avoid
++                // the anime season-pack fallback misclassifying bare-title packs.
++                if (seasonNumber == 0)
++                {
++                    _logger.Debug("Anime cascade: Season 0 of {0} — routing to special search path", series.Title);
++                    return await SearchSpecial(series, episodes, monitoredOnly, userInvokedSearch, interactiveSearch);
++                }
++
++                return await SearchAnimeSeason(series, episodes, monitoredOnly, userInvokedSearch, interactiveSearch, animeBroadQueriesEmitted, alreadyCoveredEpisodeIds);
+             }
+ 
+             if (series.SeriesType == SeriesTypes.Daily)
+@@ -374,22 +393,48 @@ private async Task<List<DownloadDecision>> SearchSpecial(Series series, List<Epi
+ 
+             downloadDecisions.AddRange(await Dispatch(indexer => indexer.Fetch(searchSpec), searchSpec));
+ 
+-            // Search for each episode by season/episode number as well
+-            foreach (var episode in episodes)
++            // Determine which episodes still need per-episode fallback
++            var episodesToSearch = episodes
++                .Where(e => interactiveSearch || !monitoredOnly || e.Monitored)
++                .ToList();
++
++            // Collect episode IDs covered by approved special-search results
++            var coveredEpisodeIds = new HashSet<int>(
++                downloadDecisions
++                    .Where(d => d.Approved)
++                    .SelectMany(d => d.RemoteEpisode.Episodes)
++                    .Select(e => e.Id));
++
++            var uncoveredEpisodes = episodesToSearch
++                .Where(ep => !coveredEpisodeIds.Contains(ep.Id))
++                .ToList();
++
++            if (uncoveredEpisodes.Any())
+             {
+-                // Episode needs to be monitored if it's not an interactive search
+-                if (!interactiveSearch && monitoredOnly && !episode.Monitored)
++                _logger.Debug(
++                    "Anime cascade [{0} Season 0]: {1}/{2} specials covered by approved special-search results, searching {3} uncovered specials individually",
++                    series.Title,
++                    episodesToSearch.Count - uncoveredEpisodes.Count,
++                    episodesToSearch.Count,
++                    uncoveredEpisodes.Count);
++
++                foreach (var episode in uncoveredEpisodes)
+                 {
+-                    continue;
++                    downloadDecisions.AddRange(await SearchSingle(series, episode, monitoredOnly, userInvokedSearch, interactiveSearch));
+                 }
+-
+-                downloadDecisions.AddRange(await SearchSingle(series, episode, monitoredOnly, userInvokedSearch, interactiveSearch));
++            }
++            else if (episodesToSearch.Any())
++            {
++                _logger.Debug(
++                    "Anime cascade [{0} Season 0]: all {1} specials covered by approved special-search results, skipping per-episode search",
++                    series.Title,
++                    episodesToSearch.Count);
+             }
+ 
+             return DeDupeDecisions(downloadDecisions);
+         }
+ 
+-        private async Task<List<DownloadDecision>> SearchAnimeSeason(Series series, List<Episode> episodes, bool monitoredOnly, bool userInvokedSearch, bool interactiveSearch)
++        private async Task<List<DownloadDecision>> SearchAnimeSeason(Series series, List<Episode> episodes, bool monitoredOnly, bool userInvokedSearch, bool interactiveSearch, HashSet<string> animeBroadQueriesEmitted = null, HashSet<int> alreadyCoveredEpisodeIds = null)
+         {
+             var downloadDecisions = new List<DownloadDecision>();
+ 
+@@ -410,14 +455,73 @@ private async Task<List<DownloadDecision>> SearchAnimeSeason(Series series, List
+             foreach (var season in seasonsToSearch)
+             {
+                 searchSpec.SeasonNumber = season.SeasonNumber;
++                searchSpec.BroadQueriesEmitted = animeBroadQueriesEmitted?.ToArray();
+ 
+                 var decisions = await Dispatch(indexer => indexer.Fetch(searchSpec), searchSpec);
+                 downloadDecisions.AddRange(decisions);
++
++                if (animeBroadQueriesEmitted != null)
++                {
++                    animeBroadQueriesEmitted.UnionWith(searchSpec.SceneTitles);
++                }
++            }
++
++            // Collect episode IDs covered by approved season search results
++            var coveredEpisodeIds = new HashSet<int>(
++                downloadDecisions
++                    .Where(d => d.Approved)
++                    .SelectMany(d => d.RemoteEpisode.Episodes)
++                    .Select(e => e.Id));
++
++            // Merge in episodes already covered by earlier season grabs (cross-season coverage)
++            if (alreadyCoveredEpisodeIds != null && alreadyCoveredEpisodeIds.Count > 0)
++            {
++                var crossSeasonCovered = episodesToSearch.Count(ep => alreadyCoveredEpisodeIds.Contains(ep.Id));
++
++                if (crossSeasonCovered > 0)
++                {
++                    _logger.Debug(
++                        "Anime cascade [{0} Season {1}]: {2} episodes already covered by earlier season grabs",
++                        series.Title,
++                        episodes.FirstOrDefault()?.SeasonNumber,
++                        crossSeasonCovered);
++                }
++
++                coveredEpisodeIds.UnionWith(alreadyCoveredEpisodeIds);
+             }
+ 
+-            foreach (var episode in episodesToSearch)
++            // Only search for episodes not already covered by an approved season result
++            // or by earlier cross-season grabs
++            var uncoveredEpisodes = episodesToSearch
++                .Where(ep => !coveredEpisodeIds.Contains(ep.Id))
++                .ToList();
++
++            if (uncoveredEpisodes.Any())
++            {
++                var seasonNum = episodes.FirstOrDefault()?.SeasonNumber;
++
++                _logger.Debug(
++                    "Anime cascade [{0} Season {1}]: {2}/{3} episodes covered (season results: {4}, cross-season grabs: {5}), searching {6} uncovered episodes individually",
++                    series.Title,
++                    seasonNum,
++                    episodesToSearch.Count - uncoveredEpisodes.Count,
++                    episodesToSearch.Count,
++                    downloadDecisions.Count(d => d.Approved),
++                    alreadyCoveredEpisodeIds?.Count(id => episodesToSearch.Any(ep => ep.Id == id)) ?? 0,
++                    uncoveredEpisodes.Count);
++
++                foreach (var episode in uncoveredEpisodes)
++                {
++                    downloadDecisions.AddRange(await SearchAnime(series, episode, monitoredOnly, userInvokedSearch, interactiveSearch, true));
++                }
++            }
++            else
+             {
+-                downloadDecisions.AddRange(await SearchAnime(series, episode, monitoredOnly, userInvokedSearch, interactiveSearch, true));
++                _logger.Debug(
++                    "Anime cascade [{0} Season {1}]: all {2} episodes covered by approved results, skipping per-episode search",
++                    series.Title,
++                    episodes.FirstOrDefault()?.SeasonNumber,
++                    episodesToSearch.Count);
+             }
+ 
+             return DeDupeDecisions(downloadDecisions);
+diff --git a/src/NzbDrone.Core/IndexerSearch/SeriesSearchService.cs b/src/NzbDrone.Core/IndexerSearch/SeriesSearchService.cs
+index 4f4f6b9adb65fdd02f1d7c802d3b1f7ae4068e3c..6cc34e308fe167a9b7b5d895b8d00223b59f3beb 100644
+--- a/src/NzbDrone.Core/IndexerSearch/SeriesSearchService.cs
++++ b/src/NzbDrone.Core/IndexerSearch/SeriesSearchService.cs
+@@ -1,4 +1,5 @@
+ using System;
++using System.Collections.Generic;
+ using System.Linq;
+ using NLog;
+ using NzbDrone.Common.Extensions;
+@@ -54,6 +55,79 @@ public void Execute(SeriesSearchCommand message)
+                     downloadedCount += processDecisions.Grabbed.Count;
+                 }
+             }
++            else if (series.SeriesType == SeriesTypes.Anime)
++            {
++                var coveredEpisodeIds = new HashSet<int>();
++                var broadQueriesEmitted = new HashSet<string>(StringComparer.InvariantCultureIgnoreCase);
++
++                // Search non-zero seasons first so a grabbed pack (e.g. S01+Specials)
++                // can cover Season 0 specials before we search for them separately.
++                foreach (var season in series.Seasons
++                    .OrderBy(s => s.SeasonNumber == 0 ? 1 : 0)
++                    .ThenBy(s => s.SeasonNumber))
++                {
++                    if (!season.Monitored)
++                    {
++                        _logger.Debug("Season {0} of {1} is not monitored, skipping search", season.SeasonNumber, series.Title);
++                        continue;
++                    }
++
++                    // Check if all monitored, aired, missing episodes in this season are already covered
++                    var seasonEpisodes = _episodeService.GetEpisodesBySeason(series.Id, season.SeasonNumber);
++                    var wantedEpisodes = seasonEpisodes
++                        .Where(e => e.Monitored &&
++                                    !e.HasFile &&
++                                    e.AirDateUtc.HasValue &&
++                                    e.AirDateUtc.Value.Before(DateTime.UtcNow))
++                        .ToList();
++
++                    if (wantedEpisodes.Any() && wantedEpisodes.All(e => coveredEpisodeIds.Contains(e.Id)))
++                    {
++                        _logger.Debug(
++                            "Anime cascade [{0} Season {1}]: all {2} wanted episodes already covered by earlier grabs, skipping season search",
++                            series.Title,
++                            season.SeasonNumber,
++                            wantedEpisodes.Count);
++                        continue;
++                    }
++
++                    if (wantedEpisodes.Any())
++                    {
++                        var alreadyCovered = wantedEpisodes.Count(e => coveredEpisodeIds.Contains(e.Id));
++
++                        if (alreadyCovered > 0)
++                        {
++                            _logger.Debug(
++                                "Anime cascade [{0} Season {1}]: {2}/{3} wanted episodes already covered by earlier grabs, searching season with partial coverage",
++                                series.Title,
++                                season.SeasonNumber,
++                                alreadyCovered,
++                                wantedEpisodes.Count);
++                        }
++                    }
++
++                    var decisions = _releaseSearchService.SeasonSearch(
++                        message.SeriesId,
++                        season.SeasonNumber,
++                        false,
++                        true,
++                        userInvokedSearch,
++                        false,
++                        broadQueriesEmitted,
++                        coveredEpisodeIds).GetAwaiter().GetResult();
++                    var processDecisions = _processDownloadDecisions.ProcessDecisions(decisions).GetAwaiter().GetResult();
++                    downloadedCount += processDecisions.Grabbed.Count;
++
++                    // Track episode IDs from grabbed results for cross-season skipping
++                    foreach (var grabbed in processDecisions.Grabbed)
++                    {
++                        foreach (var ep in grabbed.RemoteEpisode.Episodes)
++                        {
++                            coveredEpisodeIds.Add(ep.Id);
++                        }
++                    }
++                }
++            }
+             else
+             {
+                 foreach (var season in series.Seasons.OrderBy(s => s.SeasonNumber))
+diff --git a/src/NzbDrone.Core/Indexers/Newznab/NewznabRequestGenerator.cs b/src/NzbDrone.Core/Indexers/Newznab/NewznabRequestGenerator.cs
+index 43a9516ee9cd46a7915b808d39096db0ab9ab3b5..f7f827a35820b41b426543076b37c7a7ddd26c63 100644
+--- a/src/NzbDrone.Core/Indexers/Newznab/NewznabRequestGenerator.cs
++++ b/src/NzbDrone.Core/Indexers/Newznab/NewznabRequestGenerator.cs
+@@ -447,21 +447,61 @@ public virtual IndexerPageableRequestChain GetSearchRequests(AnimeSeasonSearchCr
+         {
+             var pageableRequests = new IndexerPageableRequestChain();
+ 
+-            if (SupportsSearch && Settings.AnimeStandardFormatSearch && searchCriteria.SeasonNumber > 0)
++            if (!SupportsSearch)
++            {
++                return pageableRequests;
++            }
++
++            var queryTitles = TextSearchEngine == "raw" ? searchCriteria.AllSceneTitles : searchCriteria.CleanSceneTitles;
++            var emitted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
++
++            // Build suppression set from BroadQueriesEmitted using the same title normalization
++            HashSet<string> broadAlreadyEmitted = null;
++            if (searchCriteria.BroadQueriesEmitted != null)
++            {
++                broadAlreadyEmitted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
++                foreach (var title in searchCriteria.BroadQueriesEmitted)
++                {
++                    broadAlreadyEmitted.Add(NewsnabifyTitle(title));
++                    broadAlreadyEmitted.Add(NewsnabifyTitle(SearchCriteriaBase.GetCleanSceneTitle(title)));
++                }
++            }
++
++            // Broad title-only queries to catch batch/pack releases (emitted first)
++            foreach (var queryTitle in queryTitles)
++            {
++                var normalized = NewsnabifyTitle(queryTitle);
++                var alreadySuppressed = broadAlreadyEmitted != null && broadAlreadyEmitted.Contains(normalized);
++
++                if (!alreadySuppressed && emitted.Add(normalized))
++                {
++                    pageableRequests.Add(GetPagedRequests(MaxPages,
++                        Settings.AnimeCategories,
++                        "search",
++                        $"&q={normalized}"));
++                }
++            }
++
++            // Season-specific queries (existing behavior, gated on AnimeStandardFormatSearch)
++            if (Settings.AnimeStandardFormatSearch && searchCriteria.SeasonNumber > 0)
+             {
+                 AddTvIdPageableRequests(pageableRequests,
+                     Settings.AnimeCategories,
+                     searchCriteria,
+                     $"&season={NewznabifySeasonNumber(searchCriteria.SeasonNumber)}");
+ 
+-                var queryTitles = TextSearchEngine == "raw" ? searchCriteria.AllSceneTitles : searchCriteria.CleanSceneTitles;
+-
+                 foreach (var queryTitle in queryTitles)
+                 {
+-                    pageableRequests.Add(GetPagedRequests(MaxPages,
+-                        Settings.AnimeCategories,
+-                        "tvsearch",
+-                        $"&q={NewsnabifyTitle(queryTitle)}&season={NewznabifySeasonNumber(searchCriteria.SeasonNumber)}"));
++                    var normalized = NewsnabifyTitle(queryTitle);
++                    var seasonKey = $"{normalized}|s{searchCriteria.SeasonNumber}";
++
++                    if (emitted.Add(seasonKey))
++                    {
++                        pageableRequests.Add(GetPagedRequests(MaxPages,
++                            Settings.AnimeCategories,
++                            "tvsearch",
++                            $"&q={normalized}&season={NewznabifySeasonNumber(searchCriteria.SeasonNumber)}"));
++                    }
+                 }
+             }
+ 
+diff --git a/src/NzbDrone.Core/Indexers/Nyaa/NyaaRequestGenerator.cs b/src/NzbDrone.Core/Indexers/Nyaa/NyaaRequestGenerator.cs
+index 92e9d6254a841da4a237c7b6c705a711a12fdd68..4a40eca3f05b867f5ea0376a3e66183618ba0811 100644
+--- a/src/NzbDrone.Core/Indexers/Nyaa/NyaaRequestGenerator.cs
++++ b/src/NzbDrone.Core/Indexers/Nyaa/NyaaRequestGenerator.cs
+@@ -2,6 +2,7 @@
+ using System.Linq;
+ using NzbDrone.Common.Http;
+ using NzbDrone.Core.IndexerSearch.Definitions;
++using NzbDrone.Core.Tv;
+ 
+ namespace NzbDrone.Core.Indexers.Nyaa
+ {
+@@ -22,7 +23,7 @@ public virtual IndexerPageableRequestChain GetSearchRequests(SingleEpisodeSearch
+         {
+             var pageableRequests = new IndexerPageableRequestChain();
+ 
+-            if (Settings.AnimeStandardFormatSearch && searchCriteria.SeasonNumber > 0 && searchCriteria.EpisodeNumber > 0)
++            if (Settings.AnimeStandardFormatSearch && searchCriteria.SeasonNumber >= 0 && searchCriteria.EpisodeNumber > 0)
+             {
+                 foreach (var searchTitle in searchCriteria.SceneTitles.Select(PrepareQuery))
+                 {
+@@ -86,12 +87,32 @@ public virtual IndexerPageableRequestChain GetSearchRequests(AnimeEpisodeSearchC
+         public virtual IndexerPageableRequestChain GetSearchRequests(AnimeSeasonSearchCriteria searchCriteria)
+         {
+             var pageableRequests = new IndexerPageableRequestChain();
++            var emitted = new HashSet<string>();
++            var broadQueriesEmitted = searchCriteria.BroadQueriesEmitted == null
++                ? null
++                : new HashSet<string>(searchCriteria.BroadQueriesEmitted.Select(PrepareQuery));
+ 
+             foreach (var searchTitle in searchCriteria.SceneTitles.Select(PrepareQuery))
+             {
++                // Broad title-only query to catch batch/pack releases without season markers.
++                // If a series-level snapshot is provided, skip broad queries
++                // already emitted by an earlier season search in the same series search.
++                var alreadyEmittedBroad = broadQueriesEmitted != null &&
++                                          broadQueriesEmitted.Contains(searchTitle);
++
++                if (!alreadyEmittedBroad && emitted.Add(searchTitle))
++                {
++                    pageableRequests.Add(GetPagedRequests(searchTitle));
++                }
++
+                 if (Settings.AnimeStandardFormatSearch && searchCriteria.SeasonNumber > 0)
+                 {
+-                    pageableRequests.Add(GetPagedRequests($"{searchTitle}+s{searchCriteria.SeasonNumber:00}"));
++                    var seasonTerm = $"{searchTitle}+s{searchCriteria.SeasonNumber:00}";
++
++                    if (emitted.Add(seasonTerm))
++                    {
++                        pageableRequests.Add(GetPagedRequests(seasonTerm));
++                    }
+                 }
+             }
+ 
+@@ -107,6 +128,25 @@ public virtual IndexerPageableRequestChain GetSearchRequests(SpecialEpisodeSearc
+                 pageableRequests.Add(GetPagedRequests(PrepareQuery(queryTitle)));
+             }
+ 
++            // Anime special searches: add conservative OVA/Special alias queries
++            if (searchCriteria.Series?.SeriesType == SeriesTypes.Anime)
++            {
++                var emitted = new HashSet<string>();
++
++                foreach (var searchTitle in searchCriteria.SceneTitles.Select(PrepareQuery))
++                {
++                    foreach (var alias in new[] { "ova", "oav", "special", "specials" })
++                    {
++                        var term = $"{searchTitle}+{alias}";
++
++                        if (emitted.Add(term))
++                        {
++                            pageableRequests.Add(GetPagedRequests(term));
++                        }
++                    }
++                }
++            }
++
+             return pageableRequests;
+         }
+ 
+diff --git a/src/NzbDrone.Core/Parser/Model/ParsedEpisodeInfo.cs b/src/NzbDrone.Core/Parser/Model/ParsedEpisodeInfo.cs
+index f1a7bdcb43d246b3e1b2e9c9ccc0f867c214261c..838f3487025a0a0904301a79747e5f2e18fda412 100644
+--- a/src/NzbDrone.Core/Parser/Model/ParsedEpisodeInfo.cs
++++ b/src/NzbDrone.Core/Parser/Model/ParsedEpisodeInfo.cs
+@@ -22,6 +22,7 @@ public class ParsedEpisodeInfo
+         public bool FullSeason { get; set; }
+         public bool IsPartialSeason { get; set; }
+         public bool IsMultiSeason { get; set; }
++        public int[] SeasonNumbers { get; set; }
+         public bool IsSeasonExtra { get; set; }
+         public bool IsSplitEpisode { get; set; }
+         public bool IsMiniSeries { get; set; }
+@@ -37,6 +38,7 @@ public ParsedEpisodeInfo()
+             EpisodeNumbers = Array.Empty<int>();
+             AbsoluteEpisodeNumbers = Array.Empty<int>();
+             SpecialAbsoluteEpisodeNumbers = Array.Empty<decimal>();
++            SeasonNumbers = Array.Empty<int>();
+             Languages = new List<Language>();
+         }
+ 
+diff --git a/src/NzbDrone.Core/Parser/Parser.cs b/src/NzbDrone.Core/Parser/Parser.cs
+index f94aa081a4f39a23f7a6e530c854aa62a5b8502c..fee0de918cf2051018eb5f127a6c49a6c0cf694b 100644
+--- a/src/NzbDrone.Core/Parser/Parser.cs
++++ b/src/NzbDrone.Core/Parser/Parser.cs
+@@ -131,6 +131,12 @@ public static class Parser
+                 new Regex(@"^\[(?<subgroup>.+?)\][-_. ]?(?<title>[^-]+?)(?:(?<![-_. ]|\b[0]\d+) - )(?:[-_. ]?(?<absoluteepisode>\d{2,3}(\.\d{1,2})?(?!\d+)))+(?:[-_. ]+(?<special>special|ova|ovd))?.*?(?<hash>[(\[]\w{8}[)\]])?(?:$|\.mkv)",
+                           RegexOptions.IgnoreCase | RegexOptions.Compiled),
+ 
++                // Anime - [SubGroup] Title multi-season pack S01-S04 or S01+S02+S03+S04 or (S01+S02+...) (Full season)
++                // Allows optional ( before first S; after the season list, + is only valid when followed by
++                // non-season content (not S, digit, or end-of-string), rejecting malformed tails like S01+S02+, S01+S02+Sx, S01+S02+1
++                new Regex(@"^\[(?<subgroup>.+?)\][-_. ]?(?<title>.+?)[-_. ]+\(?S(?<season>\d{1,2})(?:[-+]S(?<season>\d{1,2}))+(?:[-_. )]+|\+(?!S|\d|$)|$)",
++                    RegexOptions.IgnoreCase | RegexOptions.Compiled),
++
+                 // Anime - [SubGroup] Title with trailing number S## (Full season)
+                 new Regex(@"^\[(?<subgroup>.+?)\][-_. ]?(?<title>.+?)[-_. ]+(?:S(?<season>(?<!\d+)(?:\d{1,2}|\d{4})(?![ex]?\d+))).+?(?:$|\.mkv)",
+                     RegexOptions.IgnoreCase | RegexOptions.Compiled),
+@@ -147,6 +153,10 @@ public static class Parser
+                 new Regex(@"^\[(?<subgroup>.+?)\][-_. ]?(?<title>.+?)(?:(?<!\b[0]\d+))(?<absoluteepisode>\d{2,3}(\.\d{1,2})?(?!\d+|[-]))[. ]-[. ](?<absoluteepisode>\d{2,3}(\.\d{1,2})?(?!\d+|[-]))(?:[-_. ]+(?<special>special|ova|ovd))?.*?(?<hash>[(\[]\w{8}[)\]])?(?:$|\.mkv)",
+                     RegexOptions.IgnoreCase | RegexOptions.Compiled),
+ 
++                // Anime - [SubGroup] Title Absolute Episode Number range with dash/tilde (e.g. 1-26, 01-26, 01~26)
++                new Regex(@"^\[(?<subgroup>.+?)\][-_. ]?(?<title>.+?)[-_. ]+(?<absoluteepisode>\d{1,3}(\.\d{1,2})?)(?:[-~]| ~ )(?<absoluteepisode>\d{1,3}(\.\d{1,2})?(?!\d+))(?:[-_. ]+|\[|\(|$).*?(?<hash>[(\[]\w{8}[)\]])?(?:$|\.mkv)",
++                    RegexOptions.IgnoreCase | RegexOptions.Compiled),
++
+                 // Anime - [SubGroup] Title Absolute Episode Number
+                 new Regex(@"^\[(?<subgroup>.+?)\][-_. ]?(?<title>.+?)[-_. ]+\(?(?:[-_. ]?#?(?<absoluteepisode>\d{2,3}(\.\d{1,2})?(?!\d+|-[a-z]+)))+\)?(?:[-_. ]+(?<special>special|ova|ovd))?.*?(?<hash>[(\[]\w{8}[)\]])?(?:$|\.mkv)",
+                           RegexOptions.IgnoreCase | RegexOptions.Compiled),
+@@ -529,7 +539,7 @@ public static class Parser
+         private static readonly Regex FileExtensionRegex = new Regex(@"\.[a-z0-9]{2,4}$",
+                                                                 RegexOptions.IgnoreCase | RegexOptions.Compiled);
+ 
+-        private static readonly RegexReplace SimpleTitleRegex = new RegexReplace(@"(?:(480|540|576|720|1080|2160)[ip]|[xh][\W_]?26[45]|DD\W?5\W1|[<>?*]|848x480|1280x720|1920x1080|3840x2160|4096x2160|(?<![a-f0-9])(8|10)(b(?![a-z0-9])|bit)|10-bit)\s*?",
++        private static readonly RegexReplace SimpleTitleRegex = new RegexReplace(@"(?:(480|540|576|720|1080|2160)[ip]|[xh][\W_]?26[45]|DD\W?5\W1|[<>?*]|848x480|1280x720|1920x1080|3840x2160|4096x2160|(?<![a-f0-9])(8|10)([-_. ]bits?(?=[)\]])|bits?\b|b(?![a-z0-9]))|10-bit)\s*?",
+                                                                 string.Empty,
+                                                                 RegexOptions.IgnoreCase | RegexOptions.Compiled);
+ 
+@@ -772,7 +782,12 @@ public static ParsedEpisodeInfo ParseTitle(string title)
+ 
+                             if (result != null)
+                             {
+-                                if (result.FullSeason && result.ReleaseTokens.ContainsIgnoreCase("Special"))
++                                // Anime multi-season batch packs often include trailing metadata like
++                                // "Movies+Specials+OVAs" which must not downgrade the pack to a special.
++                                // Anime single-season packs that explicitly advertise specials (S01+Specials,
++                                // S01+Special, S01+OVA, S01+OAV) should also remain full-season packs.
++                                if (result.FullSeason && !result.IsMultiSeason && result.ReleaseTokens.ContainsIgnoreCase("Special") &&
++                                    !Regex.IsMatch(releaseTitle, @"S\d{1,2}\s*\+\s*(?:Specials?|OVA|OAV)", RegexOptions.IgnoreCase))
+                                 {
+                                     result.FullSeason = false;
+                                     result.Special = true;
+@@ -1152,6 +1167,20 @@ private static ParsedEpisodeInfo ParseMatchCollection(MatchCollection matchColle
+                 if (seasons.Distinct().Count() > 1)
+                 {
+                     result.IsMultiSeason = true;
++
++                    // Populate SeasonNumbers with all covered seasons
++                    var distinctSeasons = seasons.Distinct().OrderBy(s => s).ToList();
++
++                    if (distinctSeasons.Count == 2 && !Regex.IsMatch(releaseTitle, @"S\d{1,2}\+", RegexOptions.IgnoreCase))
++                    {
++                        // Range separator (S01-S04): expand inclusively
++                        result.SeasonNumbers = Enumerable.Range(distinctSeasons.First(), distinctSeasons.Last() - distinctSeasons.First() + 1).ToArray();
++                    }
++                    else
++                    {
++                        // Explicit list (S01+S02+S04) or 3+ captures: use exact list
++                        result.SeasonNumbers = distinctSeasons.ToArray();
++                    }
+                 }
+ 
+                 if (seasons.Any())
+diff --git a/src/NzbDrone.Core/Parser/ParsingService.cs b/src/NzbDrone.Core/Parser/ParsingService.cs
+index 7cbff94f197eef72b9c526355c486170225ca038..2d7b2dc31a1a92bf0d7343bb66d0a1a00c53893a 100644
+--- a/src/NzbDrone.Core/Parser/ParsingService.cs
++++ b/src/NzbDrone.Core/Parser/ParsingService.cs
+@@ -1,6 +1,7 @@
+ using System;
+ using System.Collections.Generic;
+ using System.Linq;
++using System.Text.RegularExpressions;
+ using NLog;
+ using NzbDrone.Common.Extensions;
+ using NzbDrone.Common.Instrumentation.Extensions;
+@@ -223,18 +224,62 @@ private List<Episode> GetEpisodes(ParsedEpisodeInfo parsedEpisodeInfo, Series se
+         {
+             if (parsedEpisodeInfo.FullSeason)
+             {
+-                if (series.UseSceneNumbering && sceneSource)
+-                {
+-                    var episodes = _episodeService.GetEpisodesBySceneSeason(series.Id, mappedSeasonNumber);
+-
+-                    // If episodes were found by the scene season number return them, otherwise fallback to look-up by season number
+-                    if (episodes.Any())
++                // Anime multi-season pack: return episodes from all covered seasons
++                if (parsedEpisodeInfo.IsMultiSeason &&
++                    parsedEpisodeInfo.SeasonNumbers.Length > 0 &&
++                    series.SeriesType == SeriesTypes.Anime)
++                {
++                    return parsedEpisodeInfo.SeasonNumbers
++                        .SelectMany(s => GetFullSeasonEpisodes(series, s, sceneSource))
++                        .GroupBy(e => e.Id)
++                        .Select(g => g.First())
++                        .ToList();
++                }
++
++                var episodes = GetFullSeasonEpisodes(series, mappedSeasonNumber, sceneSource);
++
++                // For anime single-season packs with explicit special keywords (S01+Specials,
++                // S01+OVA, etc.), co-cover exactly one wanted Season 0 special.
++                if (series.SeriesType == SeriesTypes.Anime &&
++                    mappedSeasonNumber > 0 &&
++                    !parsedEpisodeInfo.IsMultiSeason &&
++                    parsedEpisodeInfo.ReleaseTitle != null &&
++                    Regex.IsMatch(parsedEpisodeInfo.ReleaseTitle, @"\b(?:Specials?|OVA|OAV)\b", RegexOptions.IgnoreCase) &&
++                    !Regex.IsMatch(parsedEpisodeInfo.ReleaseTitle, @"\b(?:Extras?|NCOP|NCED|Menu|Bonus)\b", RegexOptions.IgnoreCase))
++                {
++                    var season0Episodes = _episodeService.GetEpisodesBySeason(series.Id, 0);
++                    var wantedSpecials = season0Episodes
++                        .Where(e => e.Monitored &&
++                                    !e.HasFile &&
++                                    e.AirDateUtc.HasValue &&
++                                    e.AirDateUtc.Value < DateTime.UtcNow)
++                        .ToList();
++
++                    if (wantedSpecials.Count == 1)
++                    {
++                        _logger.Debug(
++                            "Anime cascade: mixed pack '{0}' co-covers Season 0 special S{1:00}E{2:00}",
++                            parsedEpisodeInfo.ReleaseTitle,
++                            wantedSpecials[0].SeasonNumber,
++                            wantedSpecials[0].EpisodeNumber);
++                        episodes.Add(wantedSpecials[0]);
++                    }
++                    else if (wantedSpecials.Count > 1)
+                     {
+-                        return episodes;
++                        _logger.Debug(
++                            "Anime cascade: mixed pack '{0}' has special keywords but {1} wanted specials — co-coverage skipped (only single special supported)",
++                            parsedEpisodeInfo.ReleaseTitle,
++                            wantedSpecials.Count);
++                    }
++                    else
++                    {
++                        _logger.Debug(
++                            "Anime cascade: mixed pack '{0}' has special keywords but no wanted Season 0 specials to co-cover",
++                            parsedEpisodeInfo.ReleaseTitle);
+                     }
+                 }
+ 
+-                return _episodeService.GetEpisodesBySeason(series.Id, mappedSeasonNumber);
++                return episodes;
+             }
+ 
+             if (parsedEpisodeInfo.IsDaily)
+@@ -273,6 +318,22 @@ private List<Episode> GetEpisodes(ParsedEpisodeInfo parsedEpisodeInfo, Series se
+             return GetStandardEpisodes(series, parsedEpisodeInfo, mappedSeasonNumber, sceneSource, searchCriteria);
+         }
+ 
++        private List<Episode> GetFullSeasonEpisodes(Series series, int seasonNumber, bool sceneSource)
++        {
++            if (series.UseSceneNumbering && sceneSource)
++            {
++                var episodes = _episodeService.GetEpisodesBySceneSeason(series.Id, seasonNumber);
++
++                // If episodes were found by the scene season number return them, otherwise fallback to look-up by season number
++                if (episodes.Any())
++                {
++                    return episodes;
++                }
++            }
++
++            return _episodeService.GetEpisodesBySeason(series.Id, seasonNumber);
++        }
++
+         public ParsedEpisodeInfo ParseSpecialEpisodeTitle(ParsedEpisodeInfo parsedEpisodeInfo, string releaseTitle, int tvdbId, int tvRageId, string imdbId, SearchCriteriaBase searchCriteria = null)
+         {
+             if (searchCriteria != null)
+diff --git a/src/NzbDrone.Host/Startup.cs b/src/NzbDrone.Host/Startup.cs
+index 425ec014f90d60811f8459a7c4d8b9ff686e131f..cb90204cbce251c7a44a501b9f370f655deffb0a 100644
+--- a/src/NzbDrone.Host/Startup.cs
++++ b/src/NzbDrone.Host/Startup.cs
+@@ -238,7 +238,14 @@ public void Configure(IApplicationBuilder app,
+ 
+             if (OsInfo.IsNotWindows)
+             {
+-                Console.CancelKeyPress += (sender, eventArgs) => NLog.LogManager.Configuration = null;
++                try
++                {
++                    Console.CancelKeyPress += (sender, eventArgs) => NLog.LogManager.Configuration = null;
++                }
++                catch (TypeInitializationException)
++                {
++                    // Some hosted macOS runners can fail to initialize System.Console; skip the handler in that case.
++                }
+             }
+ 
+             eventAggregator.PublishEvent(new ApplicationStartingEvent());

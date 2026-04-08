@@ -1,0 +1,309 @@
+name: Upstream Sync
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: "Optional upstream Sonarr tag to sync (defaults to the latest release tag)"
+        required: false
+        type: string
+      dry_run:
+        description: "Prepare the sync branch and PR, but do not enable auto-merge"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    outputs:
+      skipped: ${{ steps.target.outputs.skipped }}
+      upstream_ref: ${{ steps.target.outputs.upstream_ref }}
+      upstream_version: ${{ steps.target.outputs.upstream_version }}
+      upstream_commit: ${{ steps.target.outputs.upstream_commit }}
+      sync_branch: ${{ steps.branch.outputs.sync_branch }}
+      pr_url: ${{ steps.pr.outputs.pr_url }}
+      failed_patch: ${{ steps.failed_patch.outputs.failed_patch }}
+
+    steps:
+      - name: Require Sync Bot Token
+        env:
+          SYNC_BOT_TOKEN: ${{ secrets.SYNC_BOT_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${SYNC_BOT_TOKEN}" ]]; then
+            echo "Missing required repository secret: SYNC_BOT_TOKEN" >&2
+            exit 1
+          fi
+
+      - name: Check out
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_BOT_TOKEN }}
+
+      - name: Configure Git
+        shell: bash
+        run: |
+          git config user.name "sonarr-anime sync bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Resolve Target Upstream Release
+        id: target
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_BOT_TOKEN }}
+          INPUT_UPSTREAM_REF: ${{ inputs.upstream_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${INPUT_UPSTREAM_REF}" ]]; then
+            upstream_ref="${INPUT_UPSTREAM_REF}"
+          else
+            upstream_ref="$(gh api repos/Sonarr/Sonarr/releases/latest --jq .tag_name)"
+          fi
+
+          git fetch --force https://github.com/Sonarr/Sonarr.git "${upstream_ref}"
+
+          upstream_commit="$(git rev-parse FETCH_HEAD)"
+          upstream_version="${upstream_ref#v}"
+          current_ref="$(jq -r '.upstream_ref' .fork/upstream.json)"
+
+          echo "upstream_ref=${upstream_ref}" >> "$GITHUB_OUTPUT"
+          echo "upstream_version=${upstream_version}" >> "$GITHUB_OUTPUT"
+          echo "upstream_commit=${upstream_commit}" >> "$GITHUB_OUTPUT"
+
+          if [[ "${current_ref}" == "${upstream_ref}" ]]; then
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "## Upstream Sync"
+              echo
+              echo "- Upstream ref: \`${upstream_ref}\`"
+              echo "- Status: already synced"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "skipped=false" >> "$GITHUB_OUTPUT"
+
+      - name: Build Sync Branch Name
+        id: branch
+        if: steps.target.outputs.skipped != 'true'
+        env:
+          UPSTREAM_VERSION: ${{ steps.target.outputs.upstream_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "sync_branch=automation/upstream-sync/${UPSTREAM_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Create Sync Branch
+        if: steps.target.outputs.skipped != 'true'
+        env:
+          SYNC_BRANCH: ${{ steps.branch.outputs.sync_branch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout -B "${SYNC_BRANCH}"
+
+      - name: Prepare Synced Fork Tree
+        if: steps.target.outputs.skipped != 'true'
+        env:
+          UPSTREAM_REF: ${{ steps.target.outputs.upstream_ref }}
+          UPSTREAM_VERSION: ${{ steps.target.outputs.upstream_version }}
+          UPSTREAM_COMMIT: ${{ steps.target.outputs.upstream_commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/fork/prepare-upstream-sync.sh "${UPSTREAM_REF}" "${UPSTREAM_VERSION}" "${UPSTREAM_COMMIT}"
+
+      - name: Capture Failed Patch
+        id: failed_patch
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed_patch=""
+          if [[ -f .fork/last_failed_patch ]]; then
+            failed_patch="$(cat .fork/last_failed_patch)"
+          fi
+          echo "failed_patch=${failed_patch}" >> "$GITHUB_OUTPUT"
+
+      - name: Commit Sync Changes
+        id: commit
+        if: steps.target.outputs.skipped != 'true'
+        env:
+          UPSTREAM_REF: ${{ steps.target.outputs.upstream_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "created=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "## Upstream Sync"
+              echo
+              echo "- Upstream ref: \`${UPSTREAM_REF}\`"
+              echo "- Status: no effective changes after patch replay"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          git commit -m "chore: sync upstream ${UPSTREAM_REF}"
+          echo "created=true" >> "$GITHUB_OUTPUT"
+
+      - name: Push Sync Branch
+        if: steps.target.outputs.skipped != 'true' && steps.commit.outputs.created == 'true'
+        env:
+          SYNC_BRANCH: ${{ steps.branch.outputs.sync_branch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push --force-with-lease origin "${SYNC_BRANCH}"
+
+      - name: Create Or Update Pull Request
+        id: pr
+        if: steps.target.outputs.skipped != 'true' && steps.commit.outputs.created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_BOT_TOKEN }}
+          SYNC_BRANCH: ${{ steps.branch.outputs.sync_branch }}
+          UPSTREAM_REF: ${{ steps.target.outputs.upstream_ref }}
+          UPSTREAM_VERSION: ${{ steps.target.outputs.upstream_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          existing_pr="$(gh pr list \
+            --base main \
+            --head "${SYNC_BRANCH}" \
+            --state open \
+            --json number,url \
+            --jq '.[0]')"
+
+          title="chore: sync upstream ${UPSTREAM_REF}"
+          body="$(cat <<EOF
+          ## Summary
+
+          - sync upstream Sonarr release \`${UPSTREAM_REF}\`
+          - replay the maintained sonarr-anime patch stack
+          - publish via the normal \`main\` release workflow after merge
+          EOF
+          )"
+
+          if [[ -n "${existing_pr}" && "${existing_pr}" != "null" ]]; then
+            pr_number="$(jq -r '.number' <<< "${existing_pr}")"
+            pr_url="$(jq -r '.url' <<< "${existing_pr}")"
+            gh pr edit "${pr_number}" --title "${title}" --body "${body}"
+          else
+            pr_url="$(gh pr create \
+              --base main \
+              --head "${SYNC_BRANCH}" \
+              --title "${title}" \
+              --body "${body}")"
+            pr_number="$(gh pr view "${pr_url}" --json number --jq .number)"
+          fi
+
+          echo "pr_url=${pr_url}" >> "$GITHUB_OUTPUT"
+          echo "pr_number=${pr_number}" >> "$GITHUB_OUTPUT"
+
+      - name: Enable Auto-Merge
+        if: steps.pr.outputs.pr_number != '' && inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_BOT_TOKEN }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh pr merge "${PR_NUMBER}" --auto --squash
+
+      - name: Close Blocking Issue On Sync Success
+        if: steps.pr.outputs.pr_number != ''
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_BOT_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          issue_number="$(gh issue list \
+            --state open \
+            --search 'in:title "Upstream sync blocked"' \
+            --json number \
+            --jq '.[0].number // empty')"
+
+          if [[ -n "${issue_number}" ]]; then
+            gh issue close "${issue_number}" \
+              --comment "Closing after a new upstream sync PR was created successfully."
+          fi
+
+      - name: Summarize Sync
+        if: steps.target.outputs.skipped != 'true' && steps.pr.outputs.pr_url != ''
+        env:
+          UPSTREAM_REF: ${{ steps.target.outputs.upstream_ref }}
+          PR_URL: ${{ steps.pr.outputs.pr_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Upstream Sync"
+            echo
+            echo "- Upstream ref: \`${UPSTREAM_REF}\`"
+            echo "- Pull request: ${PR_URL}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  report_sync_failure:
+    runs-on: ubuntu-latest
+    needs: sync
+    if: always() && needs.sync.result == 'failure'
+
+    steps:
+      - name: Open Or Update Blocking Issue
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_BOT_TOKEN }}
+          UPSTREAM_REF: ${{ needs.sync.outputs.upstream_ref }}
+          UPSTREAM_VERSION: ${{ needs.sync.outputs.upstream_version }}
+          UPSTREAM_COMMIT: ${{ needs.sync.outputs.upstream_commit }}
+          FAILED_PATCH: ${{ needs.sync.outputs.failed_patch }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          issue_title="Upstream sync blocked"
+          issue_body="$(cat <<EOF
+          The daily upstream sync needs manual help.
+
+          - Upstream ref: \`${UPSTREAM_REF:-unknown}\`
+          - Upstream version: \`${UPSTREAM_VERSION:-unknown}\`
+          - Upstream commit: \`${UPSTREAM_COMMIT:-unknown}\`
+          - Failed patch: \`${FAILED_PATCH:-unknown}\`
+          - Workflow run: ${RUN_URL}
+
+          Next step: inspect the failing patch, update the fork changes as needed, then regenerate \`.fork/patches\` with \`./scripts/fork/bootstrap-patches.sh\`.
+          EOF
+          )"
+
+          issue_number="$(gh issue list \
+            --state open \
+            --search "in:title \"${issue_title}\"" \
+            --json number \
+            --jq '.[0].number // empty')"
+
+          if [[ -n "${issue_number}" ]]; then
+            gh issue edit "${issue_number}" --title "${issue_title}" --body "${issue_body}"
+          else
+            gh issue create \
+              --title "${issue_title}" \
+              --body "${issue_body}"
+          fi
