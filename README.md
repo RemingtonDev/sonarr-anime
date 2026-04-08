@@ -64,7 +64,7 @@ The goal is simple: if a broad pack or season pack already covers the wanted epi
 
 ### GitHub release archives
 
-Download the latest release from the [Releases page](https://github.com/RemingtonDev/sonarr-anime/releases/latest). Releases are published with version tags such as `v4.0.17.812`. Archives are available for Linux (x64, arm, arm64), macOS (x64, arm64), Windows (x64, x86), and FreeBSD.
+Download the latest release from the [Releases page](https://github.com/RemingtonDev/sonarr-anime/releases/latest). Releases are published with tags such as `v4.0.17.2952-anime.6`. Archives are available for Linux (x64, arm, arm64), macOS (x64, arm64), Windows (x64, x86), and FreeBSD.
 
 Extract and run like stock Sonarr — the binary is a drop-in replacement.
 
@@ -120,7 +120,7 @@ Required mounts:
 | `/tv` | TV library root folder. Must match what you configure inside Sonarr. |
 | `/downloads` | Download client output. Must be accessible to both Sonarr and your download client. |
 
-For conservative installs, pin to an exact release tag such as `4.0.17.812`. Use `latest` only if you want the current stable build.
+For conservative installs, pin to an exact release tag such as `4.0.17.2952-anime.6`. Use `latest` only if you want the current stable build.
 
 **Upgrading:**
 
@@ -132,19 +132,21 @@ Your configuration and database are preserved in the `/config` volume.
 
 ## Versioning
 
-Releases use Sonarr's normal numeric build versioning.
-The About page also shows this fork's `releaseVersion`, which is the fork-specific release identifier surfaced alongside the normal upstream-style app versioning.
+This fork tracks an upstream Sonarr app version and publishes a fork-specific `releaseVersion`.
+The app version follows upstream Sonarr releases such as `4.0.17.2952`, while the published fork release adds an `-anime.<n>` suffix such as `4.0.17.2952-anime.6`.
+The About page displays the fork `releaseVersion` when it is available.
 
 Example:
 
-- GitHub release tag: `v4.0.17.812`
-- Docker image tag: `4.0.17.812`
+- Upstream app version: `4.0.17.2952`
+- GitHub release tag: `v4.0.17.2952-anime.6`
+- Docker image tag: `4.0.17.2952-anime.6`
 
 Successful `main` builds publish:
 
-- a GitHub Release tagged `v<version>`
+- a GitHub Release tagged `v<releaseVersion>`
 - packaged release archives
-- a GHCR image tagged `<version>`
+- a GHCR image tagged `<releaseVersion>`
 - `latest` after the matching GitHub Release has been created successfully
 
 ## Image tags
@@ -152,7 +154,7 @@ Successful `main` builds publish:
 | Tag | Source | Description |
 |-----|--------|-------------|
 | `latest` | `main` | Alias for the most recent successful GitHub Release |
-| `4.0.17.812` | `main` | Pinned image tag for a specific published release |
+| `4.0.17.2952-anime.6` | `main` | Pinned image tag for a specific published release |
 
 Stable releases come from `main`.
 
@@ -173,7 +175,9 @@ For general Sonarr support (UI, import, notifications, download clients, databas
 
 ## Upstream sync
 
-This fork tracks Sonarr v4 and is rebased onto upstream manually when needed. There is no automatic sync PR flow; upstream changes are reviewed and merged deliberately to keep the fork surface small.
+This fork tracks Sonarr v4 stable releases and checks upstream automatically once per day.
+When Sonarr publishes a new release tag, the repo prepares a sync PR by replaying the maintained fork patch stack on top of the new upstream snapshot.
+Successful syncs still land through a normal PR/merge flow, keeping the fork delta reviewable.
 
 ## For developers
 
