@@ -381,33 +381,20 @@ namespace NzbDrone.Core.IndexerSearch
         private async Task<List<DownloadDecision>> SearchSpecial(Series series, List<Episode> episodes, bool monitoredOnly, bool userInvokedSearch, bool interactiveSearch)
         {
             var downloadDecisions = new List<DownloadDecision>();
-
             var searchSpec = Get<SpecialEpisodeSearchCriteria>(series, episodes, monitoredOnly, userInvokedSearch, interactiveSearch);
+            var episodesToSearch = GetFallbackEpisodes(episodes, monitoredOnly, interactiveSearch);
+            var cleanSceneTitles = searchSpec.CleanSceneTitles;
 
             // build list of queries for each episode in the form: "<series> <episode-title>"
-            searchSpec.EpisodeQueryTitles = episodes.Where(e => !string.IsNullOrWhiteSpace(e.Title))
-                                                    .Where(e => interactiveSearch || !monitoredOnly || e.Monitored)
-                                                    .SelectMany(e => searchSpec.CleanSceneTitles.Select(title => title + " " + SearchCriteriaBase.GetCleanSceneTitle(e.Title)))
+            searchSpec.EpisodeQueryTitles = episodesToSearch.Where(e => !string.IsNullOrWhiteSpace(e.Title))
+                                                    .SelectMany(e => cleanSceneTitles.Select(title => title + " " + SearchCriteriaBase.GetCleanSceneTitle(e.Title)))
                                                     .Distinct(StringComparer.InvariantCultureIgnoreCase)
                                                     .ToArray();
 
             downloadDecisions.AddRange(await Dispatch(indexer => indexer.Fetch(searchSpec), searchSpec));
 
-            // Determine which episodes still need per-episode fallback
-            var episodesToSearch = episodes
-                .Where(e => interactiveSearch || !monitoredOnly || e.Monitored)
-                .ToList();
-
-            // Collect episode IDs covered by approved special-search results
-            var coveredEpisodeIds = new HashSet<int>(
-                downloadDecisions
-                    .Where(d => d.Approved)
-                    .SelectMany(d => d.RemoteEpisode.Episodes)
-                    .Select(e => e.Id));
-
-            var uncoveredEpisodes = episodesToSearch
-                .Where(ep => !coveredEpisodeIds.Contains(ep.Id))
-                .ToList();
+            var coveredEpisodeIds = GetApprovedCoveredEpisodeIds(downloadDecisions);
+            var uncoveredEpisodes = GetUncoveredEpisodes(episodesToSearch, coveredEpisodeIds);
 
             if (uncoveredEpisodes.Any())
             {
@@ -440,12 +427,7 @@ namespace NzbDrone.Core.IndexerSearch
 
             var searchSpec = Get<AnimeSeasonSearchCriteria>(series, episodes, monitoredOnly, userInvokedSearch, interactiveSearch);
 
-            // Episode needs to be monitored if it's not an interactive search
-            // and Ensure episode has an airdate and has already aired
-            var episodesToSearch = episodes
-                .Where(ep => interactiveSearch || !monitoredOnly || ep.Monitored)
-                .Where(ep => ep.AirDateUtc.HasValue && ep.AirDateUtc.Value.Before(DateTime.UtcNow))
-                .ToList();
+            var episodesToSearch = GetFallbackEpisodes(episodes, monitoredOnly, interactiveSearch, requireAiredEpisodes: true);
 
             var seasonsToSearch = GetSceneSeasonMappings(series, episodesToSearch)
                 .GroupBy(ep => ep.SeasonNumber)
@@ -466,40 +448,32 @@ namespace NzbDrone.Core.IndexerSearch
                 }
             }
 
-            // Collect episode IDs covered by approved season search results
-            var coveredEpisodeIds = new HashSet<int>(
-                downloadDecisions
-                    .Where(d => d.Approved)
-                    .SelectMany(d => d.RemoteEpisode.Episodes)
-                    .Select(e => e.Id));
+            var seasonNum = episodes.FirstOrDefault()?.SeasonNumber;
+            var eligibleEpisodeIds = new HashSet<int>(episodesToSearch.Select(ep => ep.Id));
+            var coveredEpisodeIds = GetApprovedCoveredEpisodeIds(downloadDecisions);
+            var crossSeasonCovered = 0;
 
             // Merge in episodes already covered by earlier season grabs (cross-season coverage)
             if (alreadyCoveredEpisodeIds != null && alreadyCoveredEpisodeIds.Count > 0)
             {
-                var crossSeasonCovered = episodesToSearch.Count(ep => alreadyCoveredEpisodeIds.Contains(ep.Id));
+                crossSeasonCovered = alreadyCoveredEpisodeIds.Count(eligibleEpisodeIds.Contains);
 
                 if (crossSeasonCovered > 0)
                 {
                     _logger.Debug(
                         "Anime cascade [{0} Season {1}]: {2} episodes already covered by earlier season grabs",
                         series.Title,
-                        episodes.FirstOrDefault()?.SeasonNumber,
+                        seasonNum,
                         crossSeasonCovered);
                 }
 
                 coveredEpisodeIds.UnionWith(alreadyCoveredEpisodeIds);
             }
 
-            // Only search for episodes not already covered by an approved season result
-            // or by earlier cross-season grabs
-            var uncoveredEpisodes = episodesToSearch
-                .Where(ep => !coveredEpisodeIds.Contains(ep.Id))
-                .ToList();
+            var uncoveredEpisodes = GetUncoveredEpisodes(episodesToSearch, coveredEpisodeIds);
 
             if (uncoveredEpisodes.Any())
             {
-                var seasonNum = episodes.FirstOrDefault()?.SeasonNumber;
-
                 _logger.Debug(
                     "Anime cascade [{0} Season {1}]: {2}/{3} episodes covered (season results: {4}, cross-season grabs: {5}), searching {6} uncovered episodes individually",
                     series.Title,
@@ -507,7 +481,7 @@ namespace NzbDrone.Core.IndexerSearch
                     episodesToSearch.Count - uncoveredEpisodes.Count,
                     episodesToSearch.Count,
                     downloadDecisions.Count(d => d.Approved),
-                    alreadyCoveredEpisodeIds?.Count(id => episodesToSearch.Any(ep => ep.Id == id)) ?? 0,
+                    crossSeasonCovered,
                     uncoveredEpisodes.Count);
 
                 foreach (var episode in uncoveredEpisodes)
@@ -645,6 +619,36 @@ namespace NzbDrone.Core.IndexerSearch
             }
 
             return _makeDownloadDecision.GetSearchDecision(reports, criteriaBase).ToList();
+        }
+
+        private List<Episode> GetFallbackEpisodes(List<Episode> episodes, bool monitoredOnly, bool interactiveSearch, bool requireAiredEpisodes = false)
+        {
+            var filteredEpisodes = episodes
+                .Where(ep => interactiveSearch || !monitoredOnly || ep.Monitored);
+
+            if (requireAiredEpisodes)
+            {
+                var now = DateTime.UtcNow;
+                filteredEpisodes = filteredEpisodes.Where(ep => ep.AirDateUtc.HasValue && ep.AirDateUtc.Value.Before(now));
+            }
+
+            return filteredEpisodes.ToList();
+        }
+
+        private HashSet<int> GetApprovedCoveredEpisodeIds(List<DownloadDecision> downloadDecisions)
+        {
+            return new HashSet<int>(
+                downloadDecisions
+                    .Where(d => d.Approved)
+                    .SelectMany(d => d.RemoteEpisode.Episodes)
+                    .Select(e => e.Id));
+        }
+
+        private List<Episode> GetUncoveredEpisodes(List<Episode> episodes, HashSet<int> coveredEpisodeIds)
+        {
+            return episodes
+                .Where(ep => !coveredEpisodeIds.Contains(ep.Id))
+                .ToList();
         }
 
         private async Task<IList<ReleaseInfo>> DispatchIndexer(Func<IIndexer, Task<IList<ReleaseInfo>>> searchAction, IIndexer indexer, SearchCriteriaBase criteriaBase)
