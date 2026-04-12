@@ -2,187 +2,47 @@
 
 [![Build](https://github.com/RemingtonDev/sonarr-anime/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/RemingtonDev/sonarr-anime/actions/workflows/build.yml)
 [![GitHub Release](https://img.shields.io/github/v/release/RemingtonDev/sonarr-anime)](https://github.com/RemingtonDev/sonarr-anime/releases/latest)
-[![GHCR Image](https://img.shields.io/badge/ghcr.io-sonarr--anime-blue)](https://github.com/RemingtonDev/sonarr-anime/pkgs/container/sonarr-anime)
 
-A minimal [Sonarr](https://github.com/Sonarr/Sonarr) v4 fork focused on reducing redundant anime search queries. It patches the search pipeline to try pack search first, season search second, and per-episode only as a last resort.
+sonarr-anime is a minimal [Sonarr](https://github.com/Sonarr/Sonarr) v4 fork for anime fans who already like Sonarr but want a better anime search experience. It keeps Sonarr behaving like Sonarr, while improving anime search so it can find packs first and avoid hammering indexers with episode-by-episode queries when a batch release already covers what you need.
 
-## What this fork does
+## Why this fork exists
 
-Upstream Sonarr's anime search always falls through to per-episode queries — one HTTP request per episode — creating unnecessary load on genre-oriented indexers. This fork inserts intelligent early-exit checks into the search cascade:
+Upstream Sonarr is the right choice for almost everything, but anime releases often show up in season packs, batch packs, specials, and naming styles that make a pack-first approach especially useful. This fork focuses on that narrow problem and nothing more.
 
-1. **Pack search** — if an approved release covers all wanted episodes across seasons, stop immediately
-2. **Season search** — per season, if an approved release covers all wanted episodes, skip its episodes
-3. **Per-episode search** — only for episodes not covered by steps 1-2
+- **Pack-first anime search** helps reduce redundant queries by trying broad anime pack matches before falling back to individual episode searches.
+- **Better anime pack handling** improves matching for common batch release formats, including multi-season packs and anime specials/OVAs.
+- **Minimal fork scope** keeps the rest of the experience familiar for people who already use Sonarr and just want better anime search behavior.
 
-Additional capabilities:
-- **Multi-season pack support** — recognizes `S01-S04` range and `S01+S02+S03+S04` list formats, uses them to skip later-season queries
-- **Bare-title pack matching** — during anime season search, releases like `[Group] Example Anime Title [1080p]` can be matched as Season 1 even when they include no episode numbers, no `S01`, and no `Season 1`, as long as they are just the series title plus safe trailing metadata
-- **Anime specials/OVAs** — Season 0 searches use OVA/Special-aware query generation instead of the pack fallback
-- **Bare-title + OVA matching** — releases with inline alternate-title parentheses and trailing metadata are correctly recognized during Season 0 special search
-- **S01+Specials co-coverage** — when a season pack explicitly advertises special content (e.g. `S01+Specials`, `S01+OVA`), the pack maps both the season episodes and exactly one wanted Season 0 special, allowing the S00 search to be skipped entirely
-- **Pack-first parity across supported backends** — protocol-backed search backends emit a broad title-only query before season-specific queries, matching the native pack-first behavior. Cross-season dedup prevents the same broad query from being sent twice
-- **Grab history fallback for unparseable titles** — when a download completes with a title that cannot be parsed (common for some anime packs), the fork falls back to the original grab history to identify the series and episodes. This prevents automatic imports from being blocked for releases already validated and approved during the search phase.
+## What stays the same
 
-## What this fork does not do
+This is not a reinvention of Sonarr. The goal is to keep the fork close to upstream Sonarr and limit changes to the anime-specific search path.
 
-- **Not a full product divergence.** The UI, library management, indexer configuration, download clients, quality profiles, and all non-anime search behavior are identical to upstream Sonarr v4.
-- **Not a replacement for upstream support.** Bugs or questions about general Sonarr behavior (import, notifications, database, API) should go to [upstream Sonarr](https://github.com/Sonarr/Sonarr).
-- **Some backend variants remain lightly tested.** Validation so far has focused on accessible indexers and standard protocol-backed backends. Non-standard implementations may behave differently.
+The UI, library management, download clients, quality profiles, indexer configuration, and non-anime behavior are intended to stay effectively upstream. In practice, this fork should feel like stock Sonarr for everything except the anime search improvements it was created to add. The promise here is simple: better anime search, with minimal impact on the codebase and on the day-to-day Sonarr experience you already know.
 
-## Example behavior
+## Tested and compatibility
 
-Illustrative example only:
+This fork has been tested on anime indexers through Prowlarr, with the focus on the kinds of public anime-oriented sources where pack releases are common and query efficiency matters.
 
-| Series | Seasons | Episodes | Queries (fork example) | Queries (upstream-style example) | Per-episode fallbacks |
-|--------|---------|----------|------------------------|----------------------------------|-----------------------|
-| Anime Title | S01-S04 | 96 | 2 | ~104 | 0 |
-| Anime Title: Season 1 | S01 | 12 | 6 | ~15 | 0 |
-| Anime Title: Long Season | S01 | 26 | 3 | ~29 | 0 |
+That means the current validation is strongest for anime indexers and Prowlarr-backed setups. Private trackers have not been broadly validated yet, so they should be treated as possible but not guaranteed. If you run into compatibility issues, reports are welcome. Debug logs are especially helpful, and if a private tracker needs fork-specific fixes, that work can be planned if logs are provided or testing access is shared.
 
-The goal is simple: if a broad pack or season pack already covers the wanted episodes, the fork avoids sending unnecessary per-episode searches afterward. Actual results depend on indexer behavior and available releases.
+## Keeping up with Sonarr
 
-## Tested paths
+Sonarr is the upstream project, and this fork is downstream from it. sonarr-anime tracks upstream Sonarr v4 stable releases rather than trying to become a separate product line.
 
-| Test path | Command | What it validates |
-|-----------|---------|-------------------|
-| Direct indexer path | `/test-e2e [series] [seasons]` | Pack-first cascade, broad query suppression, episode skip logic |
-| Aggregator-backed path | `/test-e2e-prowlarr [series] [seasons]` | Same cascade behavior through a protocol-backed path |
-| CI unit tests | Automatic on push/PR | Core test suite across Windows, macOS, and Linux |
-| CI unit tests (Postgres) | Automatic on push/PR | Core test suite on Ubuntu with Postgres environment enabled |
-| CI integration tests | Automatic on push/PR | Full integration test matrix across Windows, macOS, and Linux |
+When upstream Sonarr ships a new stable release, this repository syncs that release and reapplies the small set of anime-specific changes on top. That keeps the fork easier to review, easier to maintain, and much closer to upstream Sonarr than a broad long-term divergence would be.
 
-**Note on query counts:** Native indexer implementations can be leaner than protocol-backed paths, which may also emit identifier-based and title-variant queries. The acceptance criteria are broad-first ordering, cross-season suppression, and cascade/skip behavior, not identical query totals across every backend.
+## Get it
 
-## Known limitations
+Download release builds from the [GitHub Releases page](https://github.com/RemingtonDev/sonarr-anime/releases/latest).
 
-- Fork tracks Sonarr v4 (current stable) only; v5/develop is not targeted
-- Pack detection depends on release title parsing — unusual naming conventions may not be recognized
-- Protocol-backed indexers with non-standard search parameter support may not benefit from broad-first ordering
-- Multi-season coverage still depends on what a given indexer exposes for the searched title
+Container images are published at [ghcr.io/remingtondev/sonarr-anime](https://github.com/RemingtonDev/sonarr-anime/pkgs/container/sonarr-anime).
 
-## Install
+## Support
 
-### GitHub release archives
+Issues and PRs are welcome for anime-search regressions, anime indexer compatibility, and other fork-specific behavior. If something breaks, a bug report with debug logs is the most useful starting point.
 
-Download the latest release from the [Releases page](https://github.com/RemingtonDev/sonarr-anime/releases/latest). Releases are published with tags such as `v4.0.17.2952-anime.6`. Archives are available for Linux (x64, arm, arm64), macOS (x64, arm64), Windows (x64, x86), and FreeBSD.
-
-Extract and run like stock Sonarr — the binary is a drop-in replacement.
-
-### Docker
-
-Public images are available on GitHub Container Registry (GHCR):
-
-```
-ghcr.io/remingtondev/sonarr-anime
-```
-
-Supported architectures: `linux/amd64` and `linux/arm64`.
-
-### Docker quick start
-
-**docker run:**
-
-```bash
-docker run -d \
-  --name sonarr-anime \
-  -p 8989:8989 \
-  -v /path/to/config:/config \
-  -v /path/to/tv:/tv \
-  -v /path/to/downloads:/downloads \
-  ghcr.io/remingtondev/sonarr-anime:latest
-```
-
-**docker compose:**
-
-```yaml
-services:
-  sonarr:
-    image: ghcr.io/remingtondev/sonarr-anime:latest
-    container_name: sonarr-anime
-    ports:
-      - "8989:8989"
-    volumes:
-      - ./config:/config
-      - /path/to/tv:/tv
-      - /path/to/downloads:/downloads
-    restart: unless-stopped
-```
-
-### NAS / self-hosted container platforms
-
-The public images support `amd64` and `arm64`, covering Synology, QNAP, Unraid, and similar NAS platforms.
-
-Required mounts:
-
-| Mount | Purpose |
-|-------|---------|
-| `/config` | Sonarr configuration, database, and logs. Persists across container restarts. |
-| `/tv` | TV library root folder. Must match what you configure inside Sonarr. |
-| `/downloads` | Download client output. Must be accessible to both Sonarr and your download client. |
-
-For conservative installs, pin to an exact release tag such as `4.0.17.2952-anime.6`. Use `latest` only if you want the current stable build.
-
-**Upgrading:**
-
-1. Stop the container
-2. Pull the new image (`docker pull ghcr.io/remingtondev/sonarr-anime:latest`)
-3. Restart with the same mounted `/config`
-
-Your configuration and database are preserved in the `/config` volume.
-
-## Versioning
-
-This fork tracks an upstream Sonarr app version and publishes a fork-specific `releaseVersion`.
-The app version follows upstream Sonarr releases such as `4.0.17.2952`, while the published fork release adds an `-anime.<n>` suffix such as `4.0.17.2952-anime.6`.
-The About page displays the fork `releaseVersion` when it is available.
-
-Example:
-
-- Upstream app version: `4.0.17.2952`
-- GitHub release tag: `v4.0.17.2952-anime.6`
-- Docker image tag: `4.0.17.2952-anime.6`
-
-Successful `main` builds publish:
-
-- a GitHub Release tagged `v<releaseVersion>`
-- packaged release archives
-- a GHCR image tagged `<releaseVersion>`
-- `latest` after the matching GitHub Release has been created successfully
-
-## Image tags
-
-| Tag | Source | Description |
-|-----|--------|-------------|
-| `latest` | `main` | Alias for the most recent successful GitHub Release |
-| `4.0.17.2952-anime.6` | `main` | Pinned image tag for a specific published release |
-
-Stable releases come from `main`.
-
-## Security
-
-This is an independent fork, not the official Sonarr distribution. It is not affiliated with or endorsed by the Sonarr project.
-
-See [SECURITY.md](SECURITY.md) for how to report vulnerabilities in fork-owned code and release infrastructure.
-
-## Support expectations
-
-Issues are welcome for:
-- Reproducible anime-search regressions (pack cascade, query counts, parser failures)
-- Indexer compatibility reports for genre-oriented indexers and protocol-backed backends
-- Fork-owned workflow, docs, or release problems
-
-For general Sonarr support (UI, import, notifications, download clients, database), please use the [upstream Sonarr community](https://wiki.servarr.com/sonarr). This fork does not change those features.
-
-## Upstream sync
-
-This fork tracks Sonarr v4 stable releases and checks upstream automatically once per day.
-When Sonarr publishes a new release tag, the repo prepares a sync PR by replaying the maintained fork patch stack on top of the new upstream snapshot.
-Successful syncs still land through a normal PR/merge flow, keeping the fork delta reviewable.
-
-## For developers
-
-- [Contributing guide](CONTRIBUTING.md) — how to contribute to this fork
+If a private tracker needs testing, fixes can still be planned. Logs are helpful, and if hands-on testing is needed, sharing an invite or test access can make that possible. For general Sonarr questions or non-anime behavior, the best place is still the [upstream Sonarr community](https://wiki.servarr.com/sonarr).
 
 ## License
 
-Same as upstream Sonarr — [GNU GPL v3](http://www.gnu.org/licenses/gpl.html).
+Same as upstream Sonarr: [GNU GPL v3](http://www.gnu.org/licenses/gpl.html).
