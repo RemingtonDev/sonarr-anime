@@ -41,6 +41,14 @@ jobs:
 
           pr_url="$(jq -r '.workflow_run.pull_requests[0].html_url // ""' "$GITHUB_EVENT_PATH")"
 
+          if [[ -z "${pr_url}" ]]; then
+            pr_url="$(gh pr list \
+              --head "${HEAD_BRANCH}" \
+              --state open \
+              --json url \
+              --jq '.[0].url // ""')"
+          fi
+
           issue_title="Upstream sync blocked"
           issue_body="$(cat <<EOF
           The upstream sync PR branch is open, but CI is failing.
