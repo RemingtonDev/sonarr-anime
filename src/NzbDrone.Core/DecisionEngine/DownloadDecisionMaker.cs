@@ -57,6 +57,17 @@ namespace NzbDrone.Core.DecisionEngine
             @"(?<=[\]\)])[-_]\w+$", RegexOptions.Compiled);
         private static readonly Regex InlineParenBlockRegex = new Regex(
             @"\([^)]+\)", RegexOptions.Compiled);
+        private static readonly Regex AnimeAliasSeparatorRegex = new Regex(
+            @"\s*(?:/|\|)\s*", RegexOptions.Compiled);
+        private static readonly Regex TrailingSafeMetadataRegex = new Regex(
+            @"\s+(?<metadata>" + SafeToken + @"(?:[\s-]+" + SafeToken + @")*)\s*$",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex AnimeMetadataVariantRegex = new Regex(
+            @"\b(?:High(?:er)?[\s-]?Quality)\b",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex SdbdRipRegex = new Regex(
+            @"\bSD[\s-]*BD[\s-]*rip\b",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private readonly IEnumerable<IDownloadDecisionEngineSpecification> _specifications;
         private readonly IParsingService _parsingService;
@@ -311,6 +322,15 @@ namespace NzbDrone.Core.DecisionEngine
                 return null;
             }
 
+            string trailingMetadata = null;
+            var trailingMetadataMatch = TrailingSafeMetadataRegex.Match(stripped);
+
+            if (trailingMetadataMatch.Success)
+            {
+                trailingMetadata = trailingMetadataMatch.Groups["metadata"].Value;
+                stripped = stripped.Substring(0, trailingMetadataMatch.Index).TrimEnd();
+            }
+
             // Require at least one trailing bracket/paren block with safe metadata
             var blockMatch = TrailingBracketsRegex.Match(stripped);
             if (!blockMatch.Success)
@@ -330,10 +350,15 @@ namespace NzbDrone.Core.DecisionEngine
             {
                 var blockValue = block.Groups[1].Value;
 
-                if (!SafeBlockContentRegex.IsMatch(blockValue) && !YearBlockRegex.IsMatch(blockValue))
+                if (!IsSafeAnimeMetadata(blockValue))
                 {
                     return null;
                 }
+            }
+
+            if (trailingMetadata.IsNotNullOrWhiteSpace() && !IsSafeAnimeMetadata(trailingMetadata))
+            {
+                return null;
             }
 
             if (titlePart.IsNullOrWhiteSpace())
@@ -364,36 +389,7 @@ namespace NzbDrone.Core.DecisionEngine
                 return null;
             }
 
-            // Exact cleaned-title match against series title or scene titles
-            var cleanedNormalized = titlePart.CleanSeriesTitle();
-            var seriesClean = criteria.Series.Title.CleanSeriesTitle();
-
-            var matched = cleanedNormalized == seriesClean;
-
-            if (!matched && criteria.SceneTitles != null)
-            {
-                matched = criteria.SceneTitles.Any(st => st.CleanSeriesTitle() == cleanedNormalized);
-            }
-
-            if (!matched)
-            {
-                var withoutParens = InlineParenBlockRegex.Replace(titlePart, "");
-                withoutParens = TrailingSeparatorsRegex.Replace(withoutParens, "");
-                withoutParens = withoutParens.Trim();
-
-                if (!withoutParens.IsNullOrWhiteSpace())
-                {
-                    cleanedNormalized = withoutParens.CleanSeriesTitle();
-                    matched = cleanedNormalized == seriesClean;
-
-                    if (!matched && criteria.SceneTitles != null)
-                    {
-                        matched = criteria.SceneTitles.Any(st => st.CleanSeriesTitle() == cleanedNormalized);
-                    }
-                }
-            }
-
-            if (!matched)
+            if (!MatchesAnimeTitleCandidate(titlePart, criteria.Series.Title, criteria.SceneTitles))
             {
                 return null;
             }
@@ -475,37 +471,7 @@ namespace NzbDrone.Core.DecisionEngine
                 return null;
             }
 
-            // Exact cleaned-title match against series title or scene titles
-            var cleanedNormalized = titlePart.CleanSeriesTitle();
-            var seriesClean = criteria.Series.Title.CleanSeriesTitle();
-
-            var matched = cleanedNormalized == seriesClean;
-
-            if (!matched && criteria.SceneTitles != null)
-            {
-                matched = criteria.SceneTitles.Any(st => st.CleanSeriesTitle() == cleanedNormalized);
-            }
-
-            // Second pass: remove inline parenthesized alt-title blocks and retry
-            if (!matched)
-            {
-                var withoutParens = InlineParenBlockRegex.Replace(titlePart, "");
-                withoutParens = TrailingSeparatorsRegex.Replace(withoutParens, "");
-                withoutParens = withoutParens.Trim();
-
-                if (!withoutParens.IsNullOrWhiteSpace())
-                {
-                    cleanedNormalized = withoutParens.CleanSeriesTitle();
-                    matched = cleanedNormalized == seriesClean;
-
-                    if (!matched && criteria.SceneTitles != null)
-                    {
-                        matched = criteria.SceneTitles.Any(st => st.CleanSeriesTitle() == cleanedNormalized);
-                    }
-                }
-            }
-
-            if (!matched)
+            if (!MatchesAnimeTitleCandidate(titlePart, criteria.Series.Title, criteria.SceneTitles))
             {
                 return null;
             }
@@ -526,6 +492,95 @@ namespace NzbDrone.Core.DecisionEngine
                 Languages = LanguageParser.ParseLanguages(report.Title),
                 Quality = QualityParser.ParseQuality(report.Title)
             };
+        }
+
+        private static bool IsSafeAnimeMetadata(string metadata)
+        {
+            var normalized = NormalizeAnimeMetadata(metadata);
+
+            if (normalized.IsNullOrWhiteSpace())
+            {
+                return true;
+            }
+
+            return SafeBlockContentRegex.IsMatch(normalized) || YearBlockRegex.IsMatch(normalized);
+        }
+
+        private static string NormalizeAnimeMetadata(string metadata)
+        {
+            if (metadata.IsNullOrWhiteSpace())
+            {
+                return metadata;
+            }
+
+            metadata = AnimeMetadataVariantRegex.Replace(metadata, "");
+            metadata = SdbdRipRegex.Replace(metadata, "BDRip");
+            metadata = Regex.Replace(metadata, @"\s+", " ").Trim();
+
+            return metadata.Trim('-', ' ');
+        }
+
+        private static bool MatchesAnimeTitleCandidate(string titlePart, string seriesTitle, IEnumerable<string> sceneTitles)
+        {
+            var seriesClean = seriesTitle.CleanSeriesTitle();
+            var sceneTitleCleans = sceneTitles?.Select(st => st.CleanSeriesTitle()).ToList() ?? new List<string>();
+
+            foreach (var candidate in GetAnimeTitleCandidates(titlePart))
+            {
+                var cleanedCandidate = candidate.CleanSeriesTitle();
+
+                if (cleanedCandidate == seriesClean || sceneTitleCleans.Contains(cleanedCandidate))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static IEnumerable<string> GetAnimeTitleCandidates(string titlePart)
+        {
+            foreach (var baseCandidate in ExpandAliasCandidates(titlePart))
+            {
+                var normalized = NormalizeAnimeTitleCandidate(baseCandidate);
+
+                if (normalized.IsNotNullOrWhiteSpace())
+                {
+                    yield return normalized;
+                }
+
+                var withoutParens = NormalizeAnimeTitleCandidate(InlineParenBlockRegex.Replace(baseCandidate, ""));
+
+                if (withoutParens.IsNotNullOrWhiteSpace() && withoutParens != normalized)
+                {
+                    yield return withoutParens;
+                }
+            }
+        }
+
+        private static IEnumerable<string> ExpandAliasCandidates(string titlePart)
+        {
+            yield return titlePart;
+
+            foreach (var alias in AnimeAliasSeparatorRegex.Split(titlePart))
+            {
+                if (alias.IsNotNullOrWhiteSpace() && alias != titlePart)
+                {
+                    yield return alias;
+                }
+            }
+        }
+
+        private static string NormalizeAnimeTitleCandidate(string value)
+        {
+            if (value.IsNullOrWhiteSpace())
+            {
+                return value;
+            }
+
+            value = TrailingSeparatorsRegex.Replace(value, "");
+
+            return value.Trim();
         }
     }
 }

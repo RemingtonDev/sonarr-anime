@@ -509,6 +509,65 @@ namespace NzbDrone.Core.Test.DecisionEngineTests
                     Times.Once());
         }
 
+        [TestCase("Elemental Gelade / Erementar Gerad (Higher Quality)(Dual Audio) MKV DVDRip")]
+        [TestCase("[Bog] Erementar Gerad/Elemental Gelade (480p SD-BD rip) (Dual Audio)")]
+        [TestCase("Sword Art Online (High Quality)(Dual Audio) MKV DVDRip")]
+        public void should_treat_bare_title_alias_pack_with_extended_safe_metadata_as_season_pack(string releaseTitle)
+        {
+            var seriesTitle = releaseTitle.Contains("Sword Art Online") ? "Sword Art Online" : "Elemental Gelade";
+            var sceneTitles = seriesTitle == "Sword Art Online"
+                ? new List<string> { "Sword Art Online" }
+                : new List<string> { "Elemental Gelade", "Erementar Gerad" };
+
+            var series = Builder<Series>.CreateNew()
+                .With(s => s.Title = seriesTitle)
+                .With(s => s.TvdbId = seriesTitle == "Sword Art Online" ? 259640 : 79183)
+                .Build();
+
+            var episodes = new List<Episode> { Builder<Episode>.CreateNew().With(e => e.SeasonNumber = 1).Build() };
+
+            var criteria = new AnimeSeasonSearchCriteria
+            {
+                Series = series,
+                SeasonNumber = 1,
+                SceneTitles = sceneTitles,
+                Episodes = episodes
+            };
+
+            _reports = new List<ReleaseInfo> { new ReleaseInfo { Title = releaseTitle } };
+
+            var remoteEpisode = new RemoteEpisode
+            {
+                Series = series,
+                Episodes = episodes
+            };
+
+            Mocker.GetMock<IParsingService>()
+                .Setup(c => c.Map(It.IsAny<ParsedEpisodeInfo>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SearchCriteriaBase>()))
+                .Returns(remoteEpisode);
+
+            _pass1.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
+            GivenSpecifications(_pass1);
+
+            var result = Subject.GetSearchDecision(_reports, criteria).ToList();
+
+            result.Should().HaveCount(1);
+            result.First().Approved.Should().BeTrue();
+
+            Mocker.GetMock<IParsingService>()
+                .Verify(
+                    c => c.Map(
+                        It.Is<ParsedEpisodeInfo>(p =>
+                            p.FullSeason &&
+                            p.SeasonNumber == 1 &&
+                            p.SeriesTitle == seriesTitle),
+                        It.IsAny<int>(),
+                        It.IsAny<int>(),
+                        It.IsAny<string>(),
+                        It.IsAny<SearchCriteriaBase>()),
+                    Times.Once());
+        }
+
         [Test]
         public void should_not_treat_polluted_short_title_as_season_pack_during_anime_season_search()
         {
@@ -840,6 +899,60 @@ namespace NzbDrone.Core.Test.DecisionEngineTests
             {
                 Series = series,
                 SceneTitles = new List<string> { "Hai to Gensou no Grimgar" },
+                Episodes = new List<Episode> { episode },
+                EpisodeQueryTitles = new[] { "Hai to Gensou no Grimgar OVA" }
+            };
+
+            _reports = new List<ReleaseInfo> { new ReleaseInfo { Title = releaseTitle } };
+
+            var remoteEpisode = new RemoteEpisode
+            {
+                Series = series,
+                Episodes = new List<Episode> { episode }
+            };
+
+            Mocker.GetMock<IParsingService>()
+                .Setup(c => c.Map(It.IsAny<ParsedEpisodeInfo>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SearchCriteriaBase>()))
+                .Returns(remoteEpisode);
+
+            _pass1.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
+            GivenSpecifications(_pass1);
+
+            var result = Subject.GetSearchDecision(_reports, criteria).ToList();
+
+            result.Should().HaveCount(1);
+            result.First().Approved.Should().BeTrue();
+
+            Mocker.GetMock<IParsingService>()
+                .Verify(
+                    c => c.Map(
+                        It.Is<ParsedEpisodeInfo>(p => p.SeasonNumber == 0 && p.EpisodeNumbers.Contains(1)),
+                        It.IsAny<int>(),
+                        It.IsAny<int>(),
+                        It.IsAny<string>(),
+                        It.IsAny<SearchCriteriaBase>()),
+                    Times.Once());
+        }
+
+        [TestCase("[Group] Grimgar of Fantasy and Ash/Hai to Gensou no Grimgar OVA [BD]")]
+        [TestCase("[Group] Hai to Gensou no Grimgar|Grimgar of Fantasy and Ash Special [720p]")]
+        public void should_match_special_fallback_with_joined_alias_titles(string releaseTitle)
+        {
+            var series = Builder<Series>.CreateNew()
+                .With(s => s.Title = "Hai to Gensou no Grimgar")
+                .With(s => s.TvdbId = 306141)
+                .With(s => s.SeriesType = SeriesTypes.Anime)
+                .Build();
+
+            var episode = Builder<Episode>.CreateNew()
+                .With(e => e.SeasonNumber = 0)
+                .With(e => e.EpisodeNumber = 1)
+                .Build();
+
+            var criteria = new SpecialEpisodeSearchCriteria
+            {
+                Series = series,
+                SceneTitles = new List<string> { "Hai to Gensou no Grimgar", "Grimgar of Fantasy and Ash" },
                 Episodes = new List<Episode> { episode },
                 EpisodeQueryTitles = new[] { "Hai to Gensou no Grimgar OVA" }
             };
