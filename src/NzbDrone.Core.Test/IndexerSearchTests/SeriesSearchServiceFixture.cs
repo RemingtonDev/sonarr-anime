@@ -7,9 +7,11 @@ using Moq;
 using NUnit.Framework;
 using NzbDrone.Core.DecisionEngine;
 using NzbDrone.Core.Download;
+using NzbDrone.Core.Download.TrackedDownloads;
 using NzbDrone.Core.IndexerSearch;
 using NzbDrone.Core.Messaging.Commands;
 using NzbDrone.Core.Parser.Model;
+using NzbDrone.Core.Queue;
 using NzbDrone.Core.Test.Framework;
 using NzbDrone.Core.Tv;
 
@@ -45,6 +47,10 @@ namespace NzbDrone.Core.Test.IndexerSearchTests
             Mocker.GetMock<IProcessDownloadDecisions>()
                   .Setup(s => s.ProcessDecisions(It.IsAny<List<DownloadDecision>>()))
                   .Returns(Task.FromResult(new ProcessedDecisions(new List<DownloadDecision>(), new List<DownloadDecision>(), new List<DownloadDecision>())));
+
+            Mocker.GetMock<IQueueService>()
+                  .Setup(s => s.GetQueue())
+                  .Returns(new List<Queue.Queue>());
         }
 
         [Test]
@@ -397,6 +403,129 @@ namespace NzbDrone.Core.Test.IndexerSearchTests
             capturedCoveredIds.Should().NotBeNull();
             capturedCoveredIds.Should().Contain(11);
             capturedCoveredIds.Should().Contain(21);
+        }
+
+        [Test]
+        public void should_skip_anime_season_when_wanted_episodes_are_already_covered_by_queue()
+        {
+            var seasonSearches = new List<int>();
+            var season1Episode1 = Builder<Episode>.CreateNew()
+                .With(e => e.Id = 11)
+                .With(e => e.SeriesId = _series.Id)
+                .With(e => e.SeasonNumber = 1)
+                .With(e => e.Monitored = true)
+                .With(e => e.EpisodeFileId = 0)
+                .With(e => e.AirDateUtc = System.DateTime.UtcNow.AddDays(-1))
+                .Build();
+            var season1Episode2 = Builder<Episode>.CreateNew()
+                .With(e => e.Id = 12)
+                .With(e => e.SeriesId = _series.Id)
+                .With(e => e.SeasonNumber = 1)
+                .With(e => e.Monitored = true)
+                .With(e => e.EpisodeFileId = 0)
+                .With(e => e.AirDateUtc = System.DateTime.UtcNow.AddDays(-1))
+                .Build();
+
+            _series.SeriesType = SeriesTypes.Anime;
+            _series.Seasons = new List<Season>
+            {
+                new Season { SeasonNumber = 1, Monitored = true }
+            };
+
+            Mocker.GetMock<IEpisodeService>()
+                .Setup(s => s.GetEpisodesBySeason(_series.Id, 1))
+                .Returns(new List<Episode> { season1Episode1, season1Episode2 });
+
+            Mocker.GetMock<IQueueService>()
+                .Setup(s => s.GetQueue())
+                .Returns(new List<Queue.Queue>
+                {
+                    new Queue.Queue
+                    {
+                        Series = _series,
+                        Episode = season1Episode1,
+                        TrackedDownloadState = TrackedDownloadState.Downloading
+                    },
+                    new Queue.Queue
+                    {
+                        Series = _series,
+                        Episode = season1Episode2,
+                        TrackedDownloadState = TrackedDownloadState.Downloading
+                    }
+                });
+
+            Mocker.GetMock<ISearchForReleases>()
+                .Setup(s => s.SeasonSearch(_series.Id, It.IsAny<int>(), false, true, true, false, It.IsAny<HashSet<string>>(), It.IsAny<HashSet<int>>()))
+                .Returns(Task.FromResult(new List<DownloadDecision>()))
+                .Callback<int, int, bool, bool, bool, bool, HashSet<string>, HashSet<int>>((seriesId, seasonNumber, missingOnly, monitoredOnly, userInvokedSearch, interactiveSearch, broadQueries, coveredIds) => seasonSearches.Add(seasonNumber));
+
+            Subject.Execute(new SeriesSearchCommand { SeriesId = _series.Id, Trigger = CommandTrigger.Manual });
+
+            seasonSearches.Should().BeEmpty();
+        }
+
+        [Test]
+        public void should_seed_anime_covered_episode_ids_from_queue()
+        {
+            HashSet<int> capturedCoveredIds = null;
+            var season1Episode1 = Builder<Episode>.CreateNew()
+                .With(e => e.Id = 11)
+                .With(e => e.SeriesId = _series.Id)
+                .With(e => e.SeasonNumber = 1)
+                .With(e => e.Monitored = true)
+                .With(e => e.EpisodeFileId = 0)
+                .With(e => e.AirDateUtc = System.DateTime.UtcNow.AddDays(-1))
+                .Build();
+            var season1Episode2 = Builder<Episode>.CreateNew()
+                .With(e => e.Id = 12)
+                .With(e => e.SeriesId = _series.Id)
+                .With(e => e.SeasonNumber = 1)
+                .With(e => e.Monitored = true)
+                .With(e => e.EpisodeFileId = 0)
+                .With(e => e.AirDateUtc = System.DateTime.UtcNow.AddDays(-1))
+                .Build();
+
+            _series.SeriesType = SeriesTypes.Anime;
+            _series.Seasons = new List<Season>
+            {
+                new Season { SeasonNumber = 1, Monitored = true }
+            };
+
+            Mocker.GetMock<IEpisodeService>()
+                .Setup(s => s.GetEpisodesBySeason(_series.Id, 1))
+                .Returns(new List<Episode> { season1Episode1, season1Episode2 });
+
+            Mocker.GetMock<IQueueService>()
+                .Setup(s => s.GetQueue())
+                .Returns(new List<Queue.Queue>
+                {
+                    new Queue.Queue
+                    {
+                        Series = _series,
+                        Episode = season1Episode1,
+                        TrackedDownloadState = TrackedDownloadState.Downloading
+                    },
+                    new Queue.Queue
+                    {
+                        Series = _series,
+                        Episode = season1Episode2,
+                        TrackedDownloadState = TrackedDownloadState.FailedPending
+                    }
+                });
+
+            Mocker.GetMock<ISearchForReleases>()
+                .Setup(s => s.SeasonSearch(_series.Id, 1, false, true, true, false, It.IsAny<HashSet<string>>(), It.IsAny<HashSet<int>>()))
+                .Returns(Task.FromResult(new List<DownloadDecision>()))
+                .Callback<int, int, bool, bool, bool, bool, HashSet<string>, HashSet<int>>((seriesId, seasonNumber, missingOnly, monitoredOnly, userInvokedSearch, interactiveSearch, broadQueries, coveredIds) =>
+                {
+                    capturedCoveredIds = coveredIds != null ? new HashSet<int>(coveredIds) : null;
+                });
+
+            Subject.Execute(new SeriesSearchCommand { SeriesId = _series.Id, Trigger = CommandTrigger.Manual });
+
+            capturedCoveredIds.Should().NotBeNull();
+            capturedCoveredIds.Should().Contain(11);
+            capturedCoveredIds.Should().NotContain(12);
         }
 
         [Test]

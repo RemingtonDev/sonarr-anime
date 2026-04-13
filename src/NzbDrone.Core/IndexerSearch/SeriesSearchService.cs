@@ -5,7 +5,9 @@ using NLog;
 using NzbDrone.Common.Extensions;
 using NzbDrone.Common.Instrumentation.Extensions;
 using NzbDrone.Core.Download;
+using NzbDrone.Core.Download.TrackedDownloads;
 using NzbDrone.Core.Messaging.Commands;
+using NzbDrone.Core.Queue;
 using NzbDrone.Core.Tv;
 
 namespace NzbDrone.Core.IndexerSearch
@@ -16,18 +18,21 @@ namespace NzbDrone.Core.IndexerSearch
         private readonly IEpisodeService _episodeService;
         private readonly ISearchForReleases _releaseSearchService;
         private readonly IProcessDownloadDecisions _processDownloadDecisions;
+        private readonly IQueueService _queueService;
         private readonly Logger _logger;
 
         public SeriesSearchService(ISeriesService seriesService,
                                    IEpisodeService episodeService,
                                    ISearchForReleases releaseSearchService,
                                    IProcessDownloadDecisions processDownloadDecisions,
+                                   IQueueService queueService,
                                    Logger logger)
         {
             _seriesService = seriesService;
             _episodeService = episodeService;
             _releaseSearchService = releaseSearchService;
             _processDownloadDecisions = processDownloadDecisions;
+            _queueService = queueService;
             _logger = logger;
         }
 
@@ -57,7 +62,12 @@ namespace NzbDrone.Core.IndexerSearch
             }
             else if (series.SeriesType == SeriesTypes.Anime)
             {
-                var coveredEpisodeIds = new HashSet<int>();
+                var coveredEpisodeIds = new HashSet<int>(
+                    _queueService.GetQueue()
+                        .Where(q => q.Series?.Id == series.Id &&
+                                    q.Episode != null &&
+                                    q.TrackedDownloadState != TrackedDownloadState.FailedPending)
+                        .Select(q => q.Episode.Id));
                 var broadQueriesEmitted = new HashSet<string>(StringComparer.InvariantCultureIgnoreCase);
 
                 // Search non-zero seasons first so a grabbed pack (e.g. S01+Specials)
