@@ -5,8 +5,6 @@ using NzbDrone.Core.Test.Framework;
 
 namespace NzbDrone.Core.Test.Configuration
 {
-    using System.IO;
-
     [TestFixture]
     public class DeploymentInfoProviderFixture : CoreTest<DeploymentInfoProvider>
     {
@@ -14,7 +12,7 @@ namespace NzbDrone.Core.Test.Configuration
         public void SetUp()
         {
             var startUpFolder = "/opt/sonarr/bin";
-            var releaseInfoPath = Path.Combine(startUpFolder, "release_info");
+            var releaseInfoPath = System.IO.Path.Combine(startUpFolder, "release_info");
 
             Mocker.GetMock<NzbDrone.Common.EnvironmentInfo.IAppFolderInfo>()
                 .SetupGet(v => v.StartUpFolder)
