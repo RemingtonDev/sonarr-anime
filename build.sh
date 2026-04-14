@@ -119,6 +119,28 @@ PackageFiles()
 
     echo "Adding LICENSE"
     cp LICENSE.md $folder
+
+    WriteReleaseInfo "$folder"
+}
+
+WriteReleaseInfo()
+{
+    local folder="$1"
+    local releaseVersion="${RELEASE_VERSION:-${APP_VERSION:-$SONARR_VERSION}}"
+    local releaseInfoPath="$folder/release_info"
+
+    if [ -z "$releaseVersion" ]; then
+        return
+    fi
+
+    echo "Writing release_info"
+    {
+        echo "ReleaseVersion=$releaseVersion"
+
+        if [ -n "$BRANCH" ]; then
+            echo "Branch=$BRANCH"
+        fi
+    } > "$releaseInfoPath"
 }
 
 PackageLinux()
