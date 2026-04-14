@@ -132,6 +132,8 @@ jobs:
       - name: Stage Docker Context
         shell: bash
         run: |
+          release_version="${{ needs.resolve_version.outputs.release_version }}"
+
           for mapping in "amd64:linux-x64" "arm64:linux-arm64"; do
             IFS=":" read -r arch runtime <<< "$mapping"
             target_dir="Sonarr-$arch"
@@ -141,6 +143,11 @@ jobs:
             mkdir -p "$target_dir"
             cp -R "$runtime_dir"/. "$target_dir"/
             cp -R _output/UI "$target_dir"/UI
+
+            {
+              echo "ReleaseVersion=$release_version"
+              echo "Branch=${{ inputs.branch }}"
+            } > "$target_dir/release_info"
           done
 
           find Sonarr-amd64 Sonarr-arm64 \( -name "ffprobe" -o -name "Sonarr" -o -name "Sonarr.Update" \) -exec chmod a+x {} \;
