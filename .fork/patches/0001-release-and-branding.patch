@@ -612,7 +612,7 @@ index dfd8ce0e25929d24df72dbb93ab1c9d9fd4513b0..00000000000000000000000000000000
 -            echo "No changes since last run"
 -          fi
 diff --git a/.github/workflows/build.yml b/.github/workflows/build.yml
-index ac1573213f6acccaab09b0ff6a01bc79835c6b95..b407557a139f6acb6c5de491bb592f07014b92e8 100644
+index 7e4f081a2c854b86eb7f8c3cf8d1a752e760ab6f..e85dd067fb849e717e683ef35a4e2685b5ebda2f 100644
 --- a/.github/workflows/build.yml
 +++ b/.github/workflows/build.yml
 @@ -10,9 +10,14 @@ on:
