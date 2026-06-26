@@ -32,7 +32,7 @@ index 992f2a26fc6859214dd29fa20f677aa22ce8cd86..c6350f20e272aae29fbbed0239a06463
 diff --git a/src/NzbDrone.Core/DecisionEngine/DownloadDecisionMaker.cs b/src/NzbDrone.Core/DecisionEngine/DownloadDecisionMaker.cs
 old mode 100644
 new mode 100755
-index aac270bcf99b91d99d00dbb18659fb1cbc9eae70..2f8588d6fd3190ed8d38fe63b63f4508d1edfe70
+index aac270bcf99b91d99d00dbb18659fb1cbc9eae70..733d6e2e891bde810156059093f0d943946dfa0b
 --- a/src/NzbDrone.Core/DecisionEngine/DownloadDecisionMaker.cs
 +++ b/src/NzbDrone.Core/DecisionEngine/DownloadDecisionMaker.cs
 @@ -1,6 +1,7 @@
@@ -51,7 +51,7 @@ index aac270bcf99b91d99d00dbb18659fb1cbc9eae70..2f8588d6fd3190ed8d38fe63b63f4508
  
  namespace NzbDrone.Core.DecisionEngine
  {
-@@ -23,6 +25,39 @@ public interface IMakeDownloadDecision
+@@ -23,6 +25,50 @@ public interface IMakeDownloadDecision
  
      public class DownloadDecisionMaker : IMakeDownloadDecision
      {
@@ -87,11 +87,22 @@ index aac270bcf99b91d99d00dbb18659fb1cbc9eae70..2f8588d6fd3190ed8d38fe63b63f4508
 +            @"(?<=[\]\)])[-_]\w+$", RegexOptions.Compiled);
 +        private static readonly Regex InlineParenBlockRegex = new Regex(
 +            @"\([^)]+\)", RegexOptions.Compiled);
++        private static readonly Regex AnimeAliasSeparatorRegex = new Regex(
++            @"\s*(?:/|\|)\s*", RegexOptions.Compiled);
++        private static readonly Regex TrailingSafeMetadataRegex = new Regex(
++            @"\s+(?<metadata>" + SafeToken + @"(?:[\s-]+" + SafeToken + @")*)\s*$",
++            RegexOptions.IgnoreCase | RegexOptions.Compiled);
++        private static readonly Regex AnimeMetadataVariantRegex = new Regex(
++            @"\b(?:High(?:er)?[\s-]?Quality)\b",
++            RegexOptions.IgnoreCase | RegexOptions.Compiled);
++        private static readonly Regex SdbdRipRegex = new Regex(
++            @"\bSD[\s-]*BD[\s-]*rip\b",
++            RegexOptions.IgnoreCase | RegexOptions.Compiled);
 +
          private readonly IEnumerable<IDownloadDecisionEngineSpecification> _specifications;
          private readonly IParsingService _parsingService;
          private readonly ICustomFormatCalculationService _formatCalculator;
-@@ -88,6 +123,30 @@ private IEnumerable<DownloadDecision> GetDecisions(List<ReleaseInfo> reports, bo
+@@ -88,6 +134,30 @@ private IEnumerable<DownloadDecision> GetDecisions(List<ReleaseInfo> reports, bo
                          }
                      }
  
@@ -122,7 +133,7 @@ index aac270bcf99b91d99d00dbb18659fb1cbc9eae70..2f8588d6fd3190ed8d38fe63b63f4508
                      if (parsedEpisodeInfo != null && !parsedEpisodeInfo.SeriesTitle.IsNullOrWhiteSpace())
                      {
                          var remoteEpisode = _parsingService.Map(parsedEpisodeInfo, report.TvdbId, report.TvRageId, report.ImdbId, searchCriteria);
-@@ -234,5 +293,239 @@ private DownloadRejection EvaluateSpec(IDownloadDecisionEngineSpecification spec
+@@ -234,5 +304,283 @@ private DownloadRejection EvaluateSpec(IDownloadDecisionEngineSpecification spec
  
              return null;
          }
@@ -144,6 +155,15 @@ index aac270bcf99b91d99d00dbb18659fb1cbc9eae70..2f8588d6fd3190ed8d38fe63b63f4508
 +                return null;
 +            }
 +
++            string trailingMetadata = null;
++            var trailingMetadataMatch = TrailingSafeMetadataRegex.Match(stripped);
++
++            if (trailingMetadataMatch.Success)
++            {
++                trailingMetadata = trailingMetadataMatch.Groups["metadata"].Value;
++                stripped = stripped.Substring(0, trailingMetadataMatch.Index).TrimEnd();
++            }
++
 +            // Require at least one trailing bracket/paren block with safe metadata
 +            var blockMatch = TrailingBracketsRegex.Match(stripped);
 +            if (!blockMatch.Success)
@@ -163,10 +183,15 @@ index aac270bcf99b91d99d00dbb18659fb1cbc9eae70..2f8588d6fd3190ed8d38fe63b63f4508
 +            {
 +                var blockValue = block.Groups[1].Value;
 +
-+                if (!SafeBlockContentRegex.IsMatch(blockValue) && !YearBlockRegex.IsMatch(blockValue))
++                if (!IsSafeAnimeMetadata(blockValue))
 +                {
 +                    return null;
 +                }
++            }
++
++            if (trailingMetadata.IsNotNullOrWhiteSpace() && !IsSafeAnimeMetadata(trailingMetadata))
++            {
++                return null;
 +            }
 +
 +            if (titlePart.IsNullOrWhiteSpace())
@@ -197,36 +222,7 @@ index aac270bcf99b91d99d00dbb18659fb1cbc9eae70..2f8588d6fd3190ed8d38fe63b63f4508
 +                return null;
 +            }
 +
-+            // Exact cleaned-title match against series title or scene titles
-+            var cleanedNormalized = titlePart.CleanSeriesTitle();
-+            var seriesClean = criteria.Series.Title.CleanSeriesTitle();
-+
-+            var matched = cleanedNormalized == seriesClean;
-+
-+            if (!matched && criteria.SceneTitles != null)
-+            {
-+                matched = criteria.SceneTitles.Any(st => st.CleanSeriesTitle() == cleanedNormalized);
-+            }
-+
-+            if (!matched)
-+            {
-+                var withoutParens = InlineParenBlockRegex.Replace(titlePart, "");
-+                withoutParens = TrailingSeparatorsRegex.Replace(withoutParens, "");
-+                withoutParens = withoutParens.Trim();
-+
-+                if (!withoutParens.IsNullOrWhiteSpace())
-+                {
-+                    cleanedNormalized = withoutParens.CleanSeriesTitle();
-+                    matched = cleanedNormalized == seriesClean;
-+
-+                    if (!matched && criteria.SceneTitles != null)
-+                    {
-+                        matched = criteria.SceneTitles.Any(st => st.CleanSeriesTitle() == cleanedNormalized);
-+                    }
-+                }
-+            }
-+
-+            if (!matched)
++            if (!MatchesAnimeTitleCandidate(titlePart, criteria.Series.Title, criteria.SceneTitles))
 +            {
 +                return null;
 +            }
@@ -308,37 +304,7 @@ index aac270bcf99b91d99d00dbb18659fb1cbc9eae70..2f8588d6fd3190ed8d38fe63b63f4508
 +                return null;
 +            }
 +
-+            // Exact cleaned-title match against series title or scene titles
-+            var cleanedNormalized = titlePart.CleanSeriesTitle();
-+            var seriesClean = criteria.Series.Title.CleanSeriesTitle();
-+
-+            var matched = cleanedNormalized == seriesClean;
-+
-+            if (!matched && criteria.SceneTitles != null)
-+            {
-+                matched = criteria.SceneTitles.Any(st => st.CleanSeriesTitle() == cleanedNormalized);
-+            }
-+
-+            // Second pass: remove inline parenthesized alt-title blocks and retry
-+            if (!matched)
-+            {
-+                var withoutParens = InlineParenBlockRegex.Replace(titlePart, "");
-+                withoutParens = TrailingSeparatorsRegex.Replace(withoutParens, "");
-+                withoutParens = withoutParens.Trim();
-+
-+                if (!withoutParens.IsNullOrWhiteSpace())
-+                {
-+                    cleanedNormalized = withoutParens.CleanSeriesTitle();
-+                    matched = cleanedNormalized == seriesClean;
-+
-+                    if (!matched && criteria.SceneTitles != null)
-+                    {
-+                        matched = criteria.SceneTitles.Any(st => st.CleanSeriesTitle() == cleanedNormalized);
-+                    }
-+                }
-+            }
-+
-+            if (!matched)
++            if (!MatchesAnimeTitleCandidate(titlePart, criteria.Series.Title, criteria.SceneTitles))
 +            {
 +                return null;
 +            }
@@ -359,6 +325,95 @@ index aac270bcf99b91d99d00dbb18659fb1cbc9eae70..2f8588d6fd3190ed8d38fe63b63f4508
 +                Languages = LanguageParser.ParseLanguages(report.Title),
 +                Quality = QualityParser.ParseQuality(report.Title)
 +            };
++        }
++
++        private static bool IsSafeAnimeMetadata(string metadata)
++        {
++            var normalized = NormalizeAnimeMetadata(metadata);
++
++            if (normalized.IsNullOrWhiteSpace())
++            {
++                return true;
++            }
++
++            return SafeBlockContentRegex.IsMatch(normalized) || YearBlockRegex.IsMatch(normalized);
++        }
++
++        private static string NormalizeAnimeMetadata(string metadata)
++        {
++            if (metadata.IsNullOrWhiteSpace())
++            {
++                return metadata;
++            }
++
++            metadata = AnimeMetadataVariantRegex.Replace(metadata, "");
++            metadata = SdbdRipRegex.Replace(metadata, "BDRip");
++            metadata = Regex.Replace(metadata, @"\s+", " ").Trim();
++
++            return metadata.Trim('-', ' ');
++        }
++
++        private static bool MatchesAnimeTitleCandidate(string titlePart, string seriesTitle, IEnumerable<string> sceneTitles)
++        {
++            var seriesClean = seriesTitle.CleanSeriesTitle();
++            var sceneTitleCleans = sceneTitles?.Select(st => st.CleanSeriesTitle()).ToList() ?? new List<string>();
++
++            foreach (var candidate in GetAnimeTitleCandidates(titlePart))
++            {
++                var cleanedCandidate = candidate.CleanSeriesTitle();
++
++                if (cleanedCandidate == seriesClean || sceneTitleCleans.Contains(cleanedCandidate))
++                {
++                    return true;
++                }
++            }
++
++            return false;
++        }
++
++        private static IEnumerable<string> GetAnimeTitleCandidates(string titlePart)
++        {
++            foreach (var baseCandidate in ExpandAliasCandidates(titlePart))
++            {
++                var normalized = NormalizeAnimeTitleCandidate(baseCandidate);
++
++                if (normalized.IsNotNullOrWhiteSpace())
++                {
++                    yield return normalized;
++                }
++
++                var withoutParens = NormalizeAnimeTitleCandidate(InlineParenBlockRegex.Replace(baseCandidate, ""));
++
++                if (withoutParens.IsNotNullOrWhiteSpace() && withoutParens != normalized)
++                {
++                    yield return withoutParens;
++                }
++            }
++        }
++
++        private static IEnumerable<string> ExpandAliasCandidates(string titlePart)
++        {
++            yield return titlePart;
++
++            foreach (var alias in AnimeAliasSeparatorRegex.Split(titlePart))
++            {
++                if (alias.IsNotNullOrWhiteSpace() && alias != titlePart)
++                {
++                    yield return alias;
++                }
++            }
++        }
++
++        private static string NormalizeAnimeTitleCandidate(string value)
++        {
++            if (value.IsNullOrWhiteSpace())
++            {
++                return value;
++            }
++
++            value = TrailingSeparatorsRegex.Replace(value, "");
++
++            return value.Trim();
 +        }
      }
  }
@@ -897,7 +952,7 @@ index efd510f3dc2d4ae8060044b697e1ecd9177172ac..ac9cc2219d28b4e046e0dda96e6a0405
          {
              return $"[{Series.Title} : S{SeasonNumber:00}]";
 diff --git a/src/NzbDrone.Core/IndexerSearch/ReleaseSearchService.cs b/src/NzbDrone.Core/IndexerSearch/ReleaseSearchService.cs
-index 6625015c7e91a26663c1a9e832967ce03fc56674..5725b99234c6b0605d98f8444eddd8cc5d0e5152 100644
+index 6625015c7e91a26663c1a9e832967ce03fc56674..b13cb2fb0211a64aa6a1881bb3601c0dae15ac78 100644
 --- a/src/NzbDrone.Core/IndexerSearch/ReleaseSearchService.cs
 +++ b/src/NzbDrone.Core/IndexerSearch/ReleaseSearchService.cs
 @@ -23,6 +23,7 @@ public interface ISearchForReleases
@@ -952,27 +1007,30 @@ index 6625015c7e91a26663c1a9e832967ce03fc56674..5725b99234c6b0605d98f8444eddd8cc
              }
  
              if (series.SeriesType == SeriesTypes.Daily)
-@@ -374,22 +393,48 @@ private async Task<List<DownloadDecision>> SearchSpecial(Series series, List<Epi
+@@ -362,45 +381,53 @@ private async Task<List<DownloadDecision>> SearchAnime(Series series, Episode ep
+         private async Task<List<DownloadDecision>> SearchSpecial(Series series, List<Episode> episodes, bool monitoredOnly, bool userInvokedSearch, bool interactiveSearch)
+         {
+             var downloadDecisions = new List<DownloadDecision>();
+-
+             var searchSpec = Get<SpecialEpisodeSearchCriteria>(series, episodes, monitoredOnly, userInvokedSearch, interactiveSearch);
++            var episodesToSearch = GetFallbackEpisodes(episodes, monitoredOnly, interactiveSearch);
++            var cleanSceneTitles = searchSpec.CleanSceneTitles;
+ 
+             // build list of queries for each episode in the form: "<series> <episode-title>"
+-            searchSpec.EpisodeQueryTitles = episodes.Where(e => !string.IsNullOrWhiteSpace(e.Title))
+-                                                    .Where(e => interactiveSearch || !monitoredOnly || e.Monitored)
+-                                                    .SelectMany(e => searchSpec.CleanSceneTitles.Select(title => title + " " + SearchCriteriaBase.GetCleanSceneTitle(e.Title)))
++            searchSpec.EpisodeQueryTitles = episodesToSearch.Where(e => !string.IsNullOrWhiteSpace(e.Title))
++                                                    .SelectMany(e => cleanSceneTitles.Select(title => title + " " + SearchCriteriaBase.GetCleanSceneTitle(e.Title)))
+                                                     .Distinct(StringComparer.InvariantCultureIgnoreCase)
+                                                     .ToArray();
  
              downloadDecisions.AddRange(await Dispatch(indexer => indexer.Fetch(searchSpec), searchSpec));
  
 -            // Search for each episode by season/episode number as well
 -            foreach (var episode in episodes)
-+            // Determine which episodes still need per-episode fallback
-+            var episodesToSearch = episodes
-+                .Where(e => interactiveSearch || !monitoredOnly || e.Monitored)
-+                .ToList();
-+
-+            // Collect episode IDs covered by approved special-search results
-+            var coveredEpisodeIds = new HashSet<int>(
-+                downloadDecisions
-+                    .Where(d => d.Approved)
-+                    .SelectMany(d => d.RemoteEpisode.Episodes)
-+                    .Select(e => e.Id));
-+
-+            var uncoveredEpisodes = episodesToSearch
-+                .Where(ep => !coveredEpisodeIds.Contains(ep.Id))
-+                .ToList();
++            var coveredEpisodeIds = GetApprovedCoveredEpisodeIds(downloadDecisions);
++            var uncoveredEpisodes = GetUncoveredEpisodes(episodesToSearch, coveredEpisodeIds);
 +
 +            if (uncoveredEpisodes.Any())
              {
@@ -1009,7 +1067,19 @@ index 6625015c7e91a26663c1a9e832967ce03fc56674..5725b99234c6b0605d98f8444eddd8cc
          {
              var downloadDecisions = new List<DownloadDecision>();
  
-@@ -410,14 +455,73 @@ private async Task<List<DownloadDecision>> SearchAnimeSeason(Series series, List
+             var searchSpec = Get<AnimeSeasonSearchCriteria>(series, episodes, monitoredOnly, userInvokedSearch, interactiveSearch);
+ 
+-            // Episode needs to be monitored if it's not an interactive search
+-            // and Ensure episode has an airdate and has already aired
+-            var episodesToSearch = episodes
+-                .Where(ep => interactiveSearch || !monitoredOnly || ep.Monitored)
+-                .Where(ep => ep.AirDateUtc.HasValue && ep.AirDateUtc.Value.Before(DateTime.UtcNow))
+-                .ToList();
++            var episodesToSearch = GetFallbackEpisodes(episodes, monitoredOnly, interactiveSearch, requireAiredEpisodes: true);
+ 
+             var seasonsToSearch = GetSceneSeasonMappings(series, episodesToSearch)
+                 .GroupBy(ep => ep.SeasonNumber)
+@@ -410,14 +437,65 @@ private async Task<List<DownloadDecision>> SearchAnimeSeason(Series series, List
              foreach (var season in seasonsToSearch)
              {
                  searchSpec.SeasonNumber = season.SeasonNumber;
@@ -1022,43 +1092,36 @@ index 6625015c7e91a26663c1a9e832967ce03fc56674..5725b99234c6b0605d98f8444eddd8cc
 +                {
 +                    animeBroadQueriesEmitted.UnionWith(searchSpec.SceneTitles);
 +                }
-+            }
-+
-+            // Collect episode IDs covered by approved season search results
-+            var coveredEpisodeIds = new HashSet<int>(
-+                downloadDecisions
-+                    .Where(d => d.Approved)
-+                    .SelectMany(d => d.RemoteEpisode.Episodes)
-+                    .Select(e => e.Id));
+             }
+ 
+-            foreach (var episode in episodesToSearch)
++            var seasonNum = episodes.FirstOrDefault()?.SeasonNumber;
++            var eligibleEpisodeIds = new HashSet<int>(episodesToSearch.Select(ep => ep.Id));
++            var coveredEpisodeIds = GetApprovedCoveredEpisodeIds(downloadDecisions);
++            var crossSeasonCovered = 0;
 +
 +            // Merge in episodes already covered by earlier season grabs (cross-season coverage)
 +            if (alreadyCoveredEpisodeIds != null && alreadyCoveredEpisodeIds.Count > 0)
-+            {
-+                var crossSeasonCovered = episodesToSearch.Count(ep => alreadyCoveredEpisodeIds.Contains(ep.Id));
+             {
+-                downloadDecisions.AddRange(await SearchAnime(series, episode, monitoredOnly, userInvokedSearch, interactiveSearch, true));
++                crossSeasonCovered = alreadyCoveredEpisodeIds.Count(eligibleEpisodeIds.Contains);
 +
 +                if (crossSeasonCovered > 0)
 +                {
 +                    _logger.Debug(
 +                        "Anime cascade [{0} Season {1}]: {2} episodes already covered by earlier season grabs",
 +                        series.Title,
-+                        episodes.FirstOrDefault()?.SeasonNumber,
++                        seasonNum,
 +                        crossSeasonCovered);
 +                }
 +
 +                coveredEpisodeIds.UnionWith(alreadyCoveredEpisodeIds);
-             }
- 
--            foreach (var episode in episodesToSearch)
-+            // Only search for episodes not already covered by an approved season result
-+            // or by earlier cross-season grabs
-+            var uncoveredEpisodes = episodesToSearch
-+                .Where(ep => !coveredEpisodeIds.Contains(ep.Id))
-+                .ToList();
++            }
++
++            var uncoveredEpisodes = GetUncoveredEpisodes(episodesToSearch, coveredEpisodeIds);
 +
 +            if (uncoveredEpisodes.Any())
 +            {
-+                var seasonNum = episodes.FirstOrDefault()?.SeasonNumber;
-+
 +                _logger.Debug(
 +                    "Anime cascade [{0} Season {1}]: {2}/{3} episodes covered (season results: {4}, cross-season grabs: {5}), searching {6} uncovered episodes individually",
 +                    series.Title,
@@ -1066,7 +1129,7 @@ index 6625015c7e91a26663c1a9e832967ce03fc56674..5725b99234c6b0605d98f8444eddd8cc
 +                    episodesToSearch.Count - uncoveredEpisodes.Count,
 +                    episodesToSearch.Count,
 +                    downloadDecisions.Count(d => d.Approved),
-+                    alreadyCoveredEpisodeIds?.Count(id => episodesToSearch.Any(ep => ep.Id == id)) ?? 0,
++                    crossSeasonCovered,
 +                    uncoveredEpisodes.Count);
 +
 +                foreach (var episode in uncoveredEpisodes)
@@ -1075,8 +1138,7 @@ index 6625015c7e91a26663c1a9e832967ce03fc56674..5725b99234c6b0605d98f8444eddd8cc
 +                }
 +            }
 +            else
-             {
--                downloadDecisions.AddRange(await SearchAnime(series, episode, monitoredOnly, userInvokedSearch, interactiveSearch, true));
++            {
 +                _logger.Debug(
 +                    "Anime cascade [{0} Season {1}]: all {2} episodes covered by approved results, skipping per-episode search",
 +                    series.Title,
@@ -1085,23 +1147,95 @@ index 6625015c7e91a26663c1a9e832967ce03fc56674..5725b99234c6b0605d98f8444eddd8cc
              }
  
              return DeDupeDecisions(downloadDecisions);
+@@ -543,6 +621,36 @@ private async Task<List<DownloadDecision>> Dispatch(Func<IIndexer, Task<IList<Re
+             return _makeDownloadDecision.GetSearchDecision(reports, criteriaBase).ToList();
+         }
+ 
++        private List<Episode> GetFallbackEpisodes(List<Episode> episodes, bool monitoredOnly, bool interactiveSearch, bool requireAiredEpisodes = false)
++        {
++            var filteredEpisodes = episodes
++                .Where(ep => interactiveSearch || !monitoredOnly || ep.Monitored);
++
++            if (requireAiredEpisodes)
++            {
++                var now = DateTime.UtcNow;
++                filteredEpisodes = filteredEpisodes.Where(ep => ep.AirDateUtc.HasValue && ep.AirDateUtc.Value.Before(now));
++            }
++
++            return filteredEpisodes.ToList();
++        }
++
++        private HashSet<int> GetApprovedCoveredEpisodeIds(List<DownloadDecision> downloadDecisions)
++        {
++            return new HashSet<int>(
++                downloadDecisions
++                    .Where(d => d.Approved)
++                    .SelectMany(d => d.RemoteEpisode.Episodes)
++                    .Select(e => e.Id));
++        }
++
++        private List<Episode> GetUncoveredEpisodes(List<Episode> episodes, HashSet<int> coveredEpisodeIds)
++        {
++            return episodes
++                .Where(ep => !coveredEpisodeIds.Contains(ep.Id))
++                .ToList();
++        }
++
+         private async Task<IList<ReleaseInfo>> DispatchIndexer(Func<IIndexer, Task<IList<ReleaseInfo>>> searchAction, IIndexer indexer, SearchCriteriaBase criteriaBase)
+         {
+             try
 diff --git a/src/NzbDrone.Core/IndexerSearch/SeriesSearchService.cs b/src/NzbDrone.Core/IndexerSearch/SeriesSearchService.cs
-index 4f4f6b9adb65fdd02f1d7c802d3b1f7ae4068e3c..6cc34e308fe167a9b7b5d895b8d00223b59f3beb 100644
+index 4f4f6b9adb65fdd02f1d7c802d3b1f7ae4068e3c..13ddd9c421657b3fc3d1f9187cf4ca3d81ff2d13 100644
 --- a/src/NzbDrone.Core/IndexerSearch/SeriesSearchService.cs
 +++ b/src/NzbDrone.Core/IndexerSearch/SeriesSearchService.cs
-@@ -1,4 +1,5 @@
+@@ -1,10 +1,13 @@
  using System;
 +using System.Collections.Generic;
  using System.Linq;
  using NLog;
  using NzbDrone.Common.Extensions;
-@@ -54,6 +55,79 @@ public void Execute(SeriesSearchCommand message)
+ using NzbDrone.Common.Instrumentation.Extensions;
+ using NzbDrone.Core.Download;
++using NzbDrone.Core.Download.TrackedDownloads;
+ using NzbDrone.Core.Messaging.Commands;
++using NzbDrone.Core.Queue;
+ using NzbDrone.Core.Tv;
+ 
+ namespace NzbDrone.Core.IndexerSearch
+@@ -15,18 +18,21 @@ public class SeriesSearchService : IExecute<SeriesSearchCommand>
+         private readonly IEpisodeService _episodeService;
+         private readonly ISearchForReleases _releaseSearchService;
+         private readonly IProcessDownloadDecisions _processDownloadDecisions;
++        private readonly IQueueService _queueService;
+         private readonly Logger _logger;
+ 
+         public SeriesSearchService(ISeriesService seriesService,
+                                    IEpisodeService episodeService,
+                                    ISearchForReleases releaseSearchService,
+                                    IProcessDownloadDecisions processDownloadDecisions,
++                                   IQueueService queueService,
+                                    Logger logger)
+         {
+             _seriesService = seriesService;
+             _episodeService = episodeService;
+             _releaseSearchService = releaseSearchService;
+             _processDownloadDecisions = processDownloadDecisions;
++            _queueService = queueService;
+             _logger = logger;
+         }
+ 
+@@ -54,6 +60,84 @@ public void Execute(SeriesSearchCommand message)
                      downloadedCount += processDecisions.Grabbed.Count;
                  }
              }
 +            else if (series.SeriesType == SeriesTypes.Anime)
 +            {
-+                var coveredEpisodeIds = new HashSet<int>();
++                var coveredEpisodeIds = new HashSet<int>(
++                    _queueService.GetQueue()
++                        .Where(q => q.Series?.Id == series.Id &&
++                                    q.Episode != null &&
++                                    q.TrackedDownloadState != TrackedDownloadState.FailedPending)
++                        .Select(q => q.Episode.Id));
 +                var broadQueriesEmitted = new HashSet<string>(StringComparer.InvariantCultureIgnoreCase);
 +
 +                // Search non-zero seasons first so a grabbed pack (e.g. S01+Specials)

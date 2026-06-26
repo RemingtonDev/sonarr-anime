@@ -34,8 +34,52 @@ index 402cae2bfc393b6ac3c26d8be86f14d7a1b06862..2d4819b351b97b91a832c20f6fc577bd
    </ItemGroup>
    <ItemGroup>
      <ProjectReference Include="..\NzbDrone.Host\Sonarr.Host.csproj" />
+diff --git a/src/NzbDrone.Core.Test/Configuration/DeploymentInfoProviderFixture.cs b/src/NzbDrone.Core.Test/Configuration/DeploymentInfoProviderFixture.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..85cd5f633d835dd96b67fe319fd120f06c44c536
+--- /dev/null
++++ b/src/NzbDrone.Core.Test/Configuration/DeploymentInfoProviderFixture.cs
+@@ -0,0 +1,38 @@
++using FluentAssertions;
++using NUnit.Framework;
++using NzbDrone.Core.Configuration;
++using NzbDrone.Core.Test.Framework;
++
++namespace NzbDrone.Core.Test.Configuration
++{
++    [TestFixture]
++    public class DeploymentInfoProviderFixture : CoreTest<DeploymentInfoProvider>
++    {
++        [SetUp]
++        public void SetUp()
++        {
++            var startUpFolder = "/opt/sonarr/bin";
++            var releaseInfoPath = System.IO.Path.Combine(startUpFolder, "release_info");
++
++            Mocker.GetMock<NzbDrone.Common.EnvironmentInfo.IAppFolderInfo>()
++                .SetupGet(v => v.StartUpFolder)
++                .Returns(startUpFolder);
++
++            Mocker.GetMock<NzbDrone.Common.Disk.IDiskProvider>()
++                .Setup(v => v.FileExists(releaseInfoPath))
++                .Returns(true);
++
++            Mocker.GetMock<NzbDrone.Common.Disk.IDiskProvider>()
++                .Setup(v => v.ReadAllText(releaseInfoPath))
++                .Returns("ReleaseVersion=4.0.17.2952-anime.11\nBranch=main\n");
++        }
++
++        [Test]
++        public void should_read_release_version_from_release_info()
++        {
++            Subject.ReleaseVersion.Should().Be("4.0.17.2952-anime.11");
++            Subject.ReleaseBranch.Should().Be("main");
++            Subject.DefaultBranch.Should().Be("main");
++        }
++    }
++}
 diff --git a/src/NzbDrone.Core.Test/DecisionEngineTests/DownloadDecisionMakerFixture.cs b/src/NzbDrone.Core.Test/DecisionEngineTests/DownloadDecisionMakerFixture.cs
-index f71a6e2d5e7fb14d311c2936a22bc9868197a00c..bd7ee6a5b80ad98ec7b5d5220b9121753535c8fd 100644
+index f71a6e2d5e7fb14d311c2936a22bc9868197a00c..a7acdbd49364ae3504ffcd192d153cec2d9e40d4 100644
 --- a/src/NzbDrone.Core.Test/DecisionEngineTests/DownloadDecisionMakerFixture.cs
 +++ b/src/NzbDrone.Core.Test/DecisionEngineTests/DownloadDecisionMakerFixture.cs
 @@ -10,6 +10,7 @@
@@ -46,7 +90,7 @@ index f71a6e2d5e7fb14d311c2936a22bc9868197a00c..bd7ee6a5b80ad98ec7b5d5220b912175
  using NzbDrone.Core.Test.Framework;
  using NzbDrone.Core.Tv;
  using NzbDrone.Test.Common;
-@@ -347,5 +348,741 @@ public void should_return_unknown_series_rejection_if_series_title_is_an_alias_f
+@@ -347,5 +348,854 @@ public void should_return_unknown_series_rejection_if_series_title_is_an_alias_f
              result.Should().HaveCount(1);
              result.First().Rejections.First().Message.Should().Contain("12345");
          }
@@ -204,6 +248,65 @@ index f71a6e2d5e7fb14d311c2936a22bc9868197a00c..bd7ee6a5b80ad98ec7b5d5220b912175
 +                            p.SeasonNumber == 1 &&
 +                            p.SeriesTitle == "Noir" &&
 +                            p.Quality.Quality == Quality.Bluray1080p),
++                        It.IsAny<int>(),
++                        It.IsAny<int>(),
++                        It.IsAny<string>(),
++                        It.IsAny<SearchCriteriaBase>()),
++                    Times.Once());
++        }
++
++        [TestCase("Elemental Gelade / Erementar Gerad (Higher Quality)(Dual Audio) MKV DVDRip")]
++        [TestCase("[Bog] Erementar Gerad/Elemental Gelade (480p SD-BD rip) (Dual Audio)")]
++        [TestCase("Sword Art Online (High Quality)(Dual Audio) MKV DVDRip")]
++        public void should_treat_bare_title_alias_pack_with_extended_safe_metadata_as_season_pack(string releaseTitle)
++        {
++            var seriesTitle = releaseTitle.Contains("Sword Art Online") ? "Sword Art Online" : "Elemental Gelade";
++            var sceneTitles = seriesTitle == "Sword Art Online"
++                ? new List<string> { "Sword Art Online" }
++                : new List<string> { "Elemental Gelade", "Erementar Gerad" };
++
++            var series = Builder<Series>.CreateNew()
++                .With(s => s.Title = seriesTitle)
++                .With(s => s.TvdbId = seriesTitle == "Sword Art Online" ? 259640 : 79183)
++                .Build();
++
++            var episodes = new List<Episode> { Builder<Episode>.CreateNew().With(e => e.SeasonNumber = 1).Build() };
++
++            var criteria = new AnimeSeasonSearchCriteria
++            {
++                Series = series,
++                SeasonNumber = 1,
++                SceneTitles = sceneTitles,
++                Episodes = episodes
++            };
++
++            _reports = new List<ReleaseInfo> { new ReleaseInfo { Title = releaseTitle } };
++
++            var remoteEpisode = new RemoteEpisode
++            {
++                Series = series,
++                Episodes = episodes
++            };
++
++            Mocker.GetMock<IParsingService>()
++                .Setup(c => c.Map(It.IsAny<ParsedEpisodeInfo>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SearchCriteriaBase>()))
++                .Returns(remoteEpisode);
++
++            _pass1.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
++            GivenSpecifications(_pass1);
++
++            var result = Subject.GetSearchDecision(_reports, criteria).ToList();
++
++            result.Should().HaveCount(1);
++            result.First().Approved.Should().BeTrue();
++
++            Mocker.GetMock<IParsingService>()
++                .Verify(
++                    c => c.Map(
++                        It.Is<ParsedEpisodeInfo>(p =>
++                            p.FullSeason &&
++                            p.SeasonNumber == 1 &&
++                            p.SeriesTitle == seriesTitle),
 +                        It.IsAny<int>(),
 +                        It.IsAny<int>(),
 +                        It.IsAny<string>(),
@@ -542,6 +645,60 @@ index f71a6e2d5e7fb14d311c2936a22bc9868197a00c..bd7ee6a5b80ad98ec7b5d5220b912175
 +            {
 +                Series = series,
 +                SceneTitles = new List<string> { "Hai to Gensou no Grimgar" },
++                Episodes = new List<Episode> { episode },
++                EpisodeQueryTitles = new[] { "Hai to Gensou no Grimgar OVA" }
++            };
++
++            _reports = new List<ReleaseInfo> { new ReleaseInfo { Title = releaseTitle } };
++
++            var remoteEpisode = new RemoteEpisode
++            {
++                Series = series,
++                Episodes = new List<Episode> { episode }
++            };
++
++            Mocker.GetMock<IParsingService>()
++                .Setup(c => c.Map(It.IsAny<ParsedEpisodeInfo>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SearchCriteriaBase>()))
++                .Returns(remoteEpisode);
++
++            _pass1.Setup(c => c.IsSatisfiedBy(It.IsAny<RemoteEpisode>(), It.IsAny<SearchCriteriaBase>())).Returns(DownloadSpecDecision.Accept);
++            GivenSpecifications(_pass1);
++
++            var result = Subject.GetSearchDecision(_reports, criteria).ToList();
++
++            result.Should().HaveCount(1);
++            result.First().Approved.Should().BeTrue();
++
++            Mocker.GetMock<IParsingService>()
++                .Verify(
++                    c => c.Map(
++                        It.Is<ParsedEpisodeInfo>(p => p.SeasonNumber == 0 && p.EpisodeNumbers.Contains(1)),
++                        It.IsAny<int>(),
++                        It.IsAny<int>(),
++                        It.IsAny<string>(),
++                        It.IsAny<SearchCriteriaBase>()),
++                    Times.Once());
++        }
++
++        [TestCase("[Group] Grimgar of Fantasy and Ash/Hai to Gensou no Grimgar OVA [BD]")]
++        [TestCase("[Group] Hai to Gensou no Grimgar|Grimgar of Fantasy and Ash Special [720p]")]
++        public void should_match_special_fallback_with_joined_alias_titles(string releaseTitle)
++        {
++            var series = Builder<Series>.CreateNew()
++                .With(s => s.Title = "Hai to Gensou no Grimgar")
++                .With(s => s.TvdbId = 306141)
++                .With(s => s.SeriesType = SeriesTypes.Anime)
++                .Build();
++
++            var episode = Builder<Episode>.CreateNew()
++                .With(e => e.SeasonNumber = 0)
++                .With(e => e.EpisodeNumber = 1)
++                .Build();
++
++            var criteria = new SpecialEpisodeSearchCriteria
++            {
++                Series = series,
++                SceneTitles = new List<string> { "Hai to Gensou no Grimgar", "Grimgar of Fantasy and Ash" },
 +                Episodes = new List<Episode> { episode },
 +                EpisodeQueryTitles = new[] { "Hai to Gensou no Grimgar OVA" }
 +            };
@@ -1710,10 +1867,10 @@ index 0da5fb02afb0deb75bbe12d24506148bd6573064..d9ac14fc760c4102ba986e0052e27a19
      }
  }
 diff --git a/src/NzbDrone.Core.Test/IndexerSearchTests/SeriesSearchServiceFixture.cs b/src/NzbDrone.Core.Test/IndexerSearchTests/SeriesSearchServiceFixture.cs
-index ab6ab0755250a549860eccad41a530bee901e335..08fb4a247b768d3bb22bf88f3f3925cd7f13105a 100644
+index ab6ab0755250a549860eccad41a530bee901e335..599f1e7ca69127fea5af49721700c71806e049af 100644
 --- a/src/NzbDrone.Core.Test/IndexerSearchTests/SeriesSearchServiceFixture.cs
 +++ b/src/NzbDrone.Core.Test/IndexerSearchTests/SeriesSearchServiceFixture.cs
-@@ -1,6 +1,7 @@
+@@ -1,13 +1,17 @@
  using System.Collections.Generic;
  using System.Linq;
  using System.Threading.Tasks;
@@ -1721,15 +1878,17 @@ index ab6ab0755250a549860eccad41a530bee901e335..08fb4a247b768d3bb22bf88f3f3925cd
  using FluentAssertions;
  using Moq;
  using NUnit.Framework;
-@@ -8,6 +9,7 @@
+ using NzbDrone.Core.DecisionEngine;
  using NzbDrone.Core.Download;
++using NzbDrone.Core.Download.TrackedDownloads;
  using NzbDrone.Core.IndexerSearch;
  using NzbDrone.Core.Messaging.Commands;
 +using NzbDrone.Core.Parser.Model;
++using NzbDrone.Core.Queue;
  using NzbDrone.Core.Test.Framework;
  using NzbDrone.Core.Tv;
  
-@@ -36,6 +38,10 @@ public void Setup()
+@@ -36,9 +40,17 @@ public void Setup()
                    .Setup(s => s.SeasonSearch(_series.Id, It.IsAny<int>(), false, false, true, false))
                    .Returns(Task.FromResult(new List<DownloadDecision>()));
  
@@ -1740,7 +1899,14 @@ index ab6ab0755250a549860eccad41a530bee901e335..08fb4a247b768d3bb22bf88f3f3925cd
              Mocker.GetMock<IProcessDownloadDecisions>()
                    .Setup(s => s.ProcessDecisions(It.IsAny<List<DownloadDecision>>()))
                    .Returns(Task.FromResult(new ProcessedDecisions(new List<DownloadDecision>(), new List<DownloadDecision>(), new List<DownloadDecision>())));
-@@ -77,5 +83,348 @@ public void should_start_with_lower_seasons_first()
++
++            Mocker.GetMock<IQueueService>()
++                  .Setup(s => s.GetQueue())
++                  .Returns(new List<Queue.Queue>());
+         }
+ 
+         [Test]
+@@ -77,5 +89,471 @@ public void should_start_with_lower_seasons_first()
  
              seasonOrder.First().Should().Be(_series.Seasons.OrderBy(s => s.SeasonNumber).First().SeasonNumber);
          }
@@ -2058,6 +2224,129 @@ index ab6ab0755250a549860eccad41a530bee901e335..08fb4a247b768d3bb22bf88f3f3925cd
 +            capturedCoveredIds.Should().NotBeNull();
 +            capturedCoveredIds.Should().Contain(11);
 +            capturedCoveredIds.Should().Contain(21);
++        }
++
++        [Test]
++        public void should_skip_anime_season_when_wanted_episodes_are_already_covered_by_queue()
++        {
++            var seasonSearches = new List<int>();
++            var season1Episode1 = Builder<Episode>.CreateNew()
++                .With(e => e.Id = 11)
++                .With(e => e.SeriesId = _series.Id)
++                .With(e => e.SeasonNumber = 1)
++                .With(e => e.Monitored = true)
++                .With(e => e.EpisodeFileId = 0)
++                .With(e => e.AirDateUtc = System.DateTime.UtcNow.AddDays(-1))
++                .Build();
++            var season1Episode2 = Builder<Episode>.CreateNew()
++                .With(e => e.Id = 12)
++                .With(e => e.SeriesId = _series.Id)
++                .With(e => e.SeasonNumber = 1)
++                .With(e => e.Monitored = true)
++                .With(e => e.EpisodeFileId = 0)
++                .With(e => e.AirDateUtc = System.DateTime.UtcNow.AddDays(-1))
++                .Build();
++
++            _series.SeriesType = SeriesTypes.Anime;
++            _series.Seasons = new List<Season>
++            {
++                new Season { SeasonNumber = 1, Monitored = true }
++            };
++
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySeason(_series.Id, 1))
++                .Returns(new List<Episode> { season1Episode1, season1Episode2 });
++
++            Mocker.GetMock<IQueueService>()
++                .Setup(s => s.GetQueue())
++                .Returns(new List<Queue.Queue>
++                {
++                    new Queue.Queue
++                    {
++                        Series = _series,
++                        Episode = season1Episode1,
++                        TrackedDownloadState = TrackedDownloadState.Downloading
++                    },
++                    new Queue.Queue
++                    {
++                        Series = _series,
++                        Episode = season1Episode2,
++                        TrackedDownloadState = TrackedDownloadState.Downloading
++                    }
++                });
++
++            Mocker.GetMock<ISearchForReleases>()
++                .Setup(s => s.SeasonSearch(_series.Id, It.IsAny<int>(), false, true, true, false, It.IsAny<HashSet<string>>(), It.IsAny<HashSet<int>>()))
++                .Returns(Task.FromResult(new List<DownloadDecision>()))
++                .Callback<int, int, bool, bool, bool, bool, HashSet<string>, HashSet<int>>((seriesId, seasonNumber, missingOnly, monitoredOnly, userInvokedSearch, interactiveSearch, broadQueries, coveredIds) => seasonSearches.Add(seasonNumber));
++
++            Subject.Execute(new SeriesSearchCommand { SeriesId = _series.Id, Trigger = CommandTrigger.Manual });
++
++            seasonSearches.Should().BeEmpty();
++        }
++
++        [Test]
++        public void should_seed_anime_covered_episode_ids_from_queue()
++        {
++            HashSet<int> capturedCoveredIds = null;
++            var season1Episode1 = Builder<Episode>.CreateNew()
++                .With(e => e.Id = 11)
++                .With(e => e.SeriesId = _series.Id)
++                .With(e => e.SeasonNumber = 1)
++                .With(e => e.Monitored = true)
++                .With(e => e.EpisodeFileId = 0)
++                .With(e => e.AirDateUtc = System.DateTime.UtcNow.AddDays(-1))
++                .Build();
++            var season1Episode2 = Builder<Episode>.CreateNew()
++                .With(e => e.Id = 12)
++                .With(e => e.SeriesId = _series.Id)
++                .With(e => e.SeasonNumber = 1)
++                .With(e => e.Monitored = true)
++                .With(e => e.EpisodeFileId = 0)
++                .With(e => e.AirDateUtc = System.DateTime.UtcNow.AddDays(-1))
++                .Build();
++
++            _series.SeriesType = SeriesTypes.Anime;
++            _series.Seasons = new List<Season>
++            {
++                new Season { SeasonNumber = 1, Monitored = true }
++            };
++
++            Mocker.GetMock<IEpisodeService>()
++                .Setup(s => s.GetEpisodesBySeason(_series.Id, 1))
++                .Returns(new List<Episode> { season1Episode1, season1Episode2 });
++
++            Mocker.GetMock<IQueueService>()
++                .Setup(s => s.GetQueue())
++                .Returns(new List<Queue.Queue>
++                {
++                    new Queue.Queue
++                    {
++                        Series = _series,
++                        Episode = season1Episode1,
++                        TrackedDownloadState = TrackedDownloadState.Downloading
++                    },
++                    new Queue.Queue
++                    {
++                        Series = _series,
++                        Episode = season1Episode2,
++                        TrackedDownloadState = TrackedDownloadState.FailedPending
++                    }
++                });
++
++            Mocker.GetMock<ISearchForReleases>()
++                .Setup(s => s.SeasonSearch(_series.Id, 1, false, true, true, false, It.IsAny<HashSet<string>>(), It.IsAny<HashSet<int>>()))
++                .Returns(Task.FromResult(new List<DownloadDecision>()))
++                .Callback<int, int, bool, bool, bool, bool, HashSet<string>, HashSet<int>>((seriesId, seasonNumber, missingOnly, monitoredOnly, userInvokedSearch, interactiveSearch, broadQueries, coveredIds) =>
++                {
++                    capturedCoveredIds = coveredIds != null ? new HashSet<int>(coveredIds) : null;
++                });
++
++            Subject.Execute(new SeriesSearchCommand { SeriesId = _series.Id, Trigger = CommandTrigger.Manual });
++
++            capturedCoveredIds.Should().NotBeNull();
++            capturedCoveredIds.Should().Contain(11);
++            capturedCoveredIds.Should().NotContain(12);
 +        }
 +
 +        [Test]
