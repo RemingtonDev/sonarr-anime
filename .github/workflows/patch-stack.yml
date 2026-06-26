@@ -1,0 +1,34 @@
+name: Patch Stack
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify Patch Stack
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/fork/bootstrap-patches.sh
+          if ! git diff --exit-code -- .fork/patches; then
+            echo "Patch stack is stale. Run ./scripts/fork/bootstrap-patches.sh and commit the regenerated .fork/patches files." >&2
+            exit 1
+          fi

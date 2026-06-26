@@ -33,6 +33,7 @@ jobs:
       - name: Open Or Update Blocking Issue
         env:
           GH_TOKEN: ${{ secrets.SYNC_BOT_TOKEN }}
+          REPO: ${{ github.repository }}
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
         shell: bash
@@ -43,6 +44,7 @@ jobs:
 
           if [[ -z "${pr_url}" ]]; then
             pr_url="$(gh pr list \
+              --repo "${REPO}" \
               --head "${HEAD_BRANCH}" \
               --state open \
               --json url \
@@ -62,15 +64,17 @@ jobs:
           )"
 
           issue_number="$(gh issue list \
+            --repo "${REPO}" \
             --state open \
             --search "in:title \"${issue_title}\"" \
             --json number \
             --jq '.[0].number // empty')"
 
           if [[ -n "${issue_number}" ]]; then
-            gh issue edit "${issue_number}" --title "${issue_title}" --body "${issue_body}"
+            gh issue edit "${issue_number}" --repo "${REPO}" --title "${issue_title}" --body "${issue_body}"
           else
             gh issue create \
+              --repo "${REPO}" \
               --title "${issue_title}" \
               --body "${issue_body}"
           fi

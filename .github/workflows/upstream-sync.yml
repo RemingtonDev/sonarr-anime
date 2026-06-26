@@ -232,11 +232,13 @@ jobs:
         if: steps.pr.outputs.pr_number != ''
         env:
           GH_TOKEN: ${{ secrets.SYNC_BOT_TOKEN }}
+          REPO: ${{ github.repository }}
         shell: bash
         run: |
           set -euo pipefail
 
           issue_number="$(gh issue list \
+            --repo "${REPO}" \
             --state open \
             --search 'in:title "Upstream sync blocked"' \
             --json number \
@@ -244,6 +246,7 @@ jobs:
 
           if [[ -n "${issue_number}" ]]; then
             gh issue close "${issue_number}" \
+              --repo "${REPO}" \
               --comment "Closing after a new upstream sync PR was created successfully."
           fi
 
@@ -271,6 +274,7 @@ jobs:
       - name: Open Or Update Blocking Issue
         env:
           GH_TOKEN: ${{ secrets.SYNC_BOT_TOKEN }}
+          REPO: ${{ github.repository }}
           UPSTREAM_REF: ${{ needs.sync.outputs.upstream_ref }}
           UPSTREAM_VERSION: ${{ needs.sync.outputs.upstream_version }}
           UPSTREAM_COMMIT: ${{ needs.sync.outputs.upstream_commit }}
@@ -295,15 +299,17 @@ jobs:
           )"
 
           issue_number="$(gh issue list \
+            --repo "${REPO}" \
             --state open \
             --search "in:title \"${issue_title}\"" \
             --json number \
             --jq '.[0].number // empty')"
 
           if [[ -n "${issue_number}" ]]; then
-            gh issue edit "${issue_number}" --title "${issue_title}" --body "${issue_body}"
+            gh issue edit "${issue_number}" --repo "${REPO}" --title "${issue_title}" --body "${issue_body}"
           else
             gh issue create \
+              --repo "${REPO}" \
               --title "${issue_title}" \
               --body "${issue_body}"
           fi

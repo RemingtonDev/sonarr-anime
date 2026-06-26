@@ -5,6 +5,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 METADATA_FILE="${ROOT_DIR}/.fork/upstream.json"
 FAILED_PATCH_FILE="${ROOT_DIR}/.fork/last_failed_patch"
+GENERATOR="${ROOT_DIR}/scripts/fork/generate-patches.sh"
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "jq is required" >&2
@@ -65,7 +66,7 @@ for patch in "${patches[@]}"; do
   git apply --3way --whitespace=nowarn "${patch}"
 done
 
-rm -f "${FAILED_PATCH_FILE}"
+printf '%s\n' "patch-regeneration" > "${FAILED_PATCH_FILE}"
 
 jq \
   --arg upstream_ref "${UPSTREAM_REF}" \
@@ -77,5 +78,9 @@ jq \
   "${METADATA_FILE}" > "${METADATA_FILE}.tmp"
 
 mv "${METADATA_FILE}.tmp" "${METADATA_FILE}"
+
+"${GENERATOR}" "${ARCHIVE_REF}" --worktree
+
+rm -f "${FAILED_PATCH_FILE}"
 
 echo "Prepared fork tree from ${UPSTREAM_REF}"

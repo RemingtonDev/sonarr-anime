@@ -612,7 +612,7 @@ index dfd8ce0e25929d24df72dbb93ab1c9d9fd4513b0..00000000000000000000000000000000
 -            echo "No changes since last run"
 -          fi
 diff --git a/.github/workflows/build.yml b/.github/workflows/build.yml
-index ac1573213f6acccaab09b0ff6a01bc79835c6b95..da40606f7abbea5f3e91c9685e092ce926058eaf 100644
+index ac1573213f6acccaab09b0ff6a01bc79835c6b95..b407557a139f6acb6c5de491bb592f07014b92e8 100644
 --- a/.github/workflows/build.yml
 +++ b/.github/workflows/build.yml
 @@ -10,9 +10,14 @@ on:
@@ -630,16 +630,7 @@ index ac1573213f6acccaab09b0ff6a01bc79835c6b95..da40606f7abbea5f3e91c9685e092ce9
  
  concurrency:
    group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-@@ -22,7 +27,7 @@ env:
-   FRAMEWORK: net6.0
-   RAW_BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
-   SONARR_MAJOR_VERSION: 4
--  VERSION: 4.0.17
-+  UPSTREAM_VERSION: 4.0.17.2952
- 
- jobs:
-   backend:
-@@ -30,29 +35,33 @@ jobs:
+@@ -30,29 +35,37 @@ jobs:
      outputs:
        framework: ${{ steps.variables.outputs.framework }}
        major_version: ${{ steps.variables.outputs.major_version }}
@@ -658,6 +649,10 @@ index ac1573213f6acccaab09b0ff6a01bc79835c6b95..da40606f7abbea5f3e91c9685e092ce9
 +        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
 +        with:
 +          dotnet-version: 6.0.100
++
++      - name: Load Upstream Metadata
++        shell: bash
++        run: ./scripts/fork/export-upstream-env.sh >> "$GITHUB_ENV"
  
        - name: Setup Environment Variables
          id: variables
@@ -665,7 +660,7 @@ index ac1573213f6acccaab09b0ff6a01bc79835c6b95..da40606f7abbea5f3e91c9685e092ce9
          run: |
 -          # Add 800 to the build number because GitHub won't let us pick an arbitrary starting point
 -          SONARR_VERSION="${{ env.VERSION }}.$((${{ github.run_number }}+800))"
-+          APP_VERSION="${{ env.UPSTREAM_VERSION }}"
++          APP_VERSION="${UPSTREAM_VERSION}"
            DOTNET_VERSION=$(jq -r '.sdk.version' global.json)
  
            echo "SDK_PATH=${{ env.DOTNET_ROOT }}/sdk/${DOTNET_VERSION}" >> "$GITHUB_ENV"
@@ -680,7 +675,7 @@ index ac1573213f6acccaab09b0ff6a01bc79835c6b95..da40606f7abbea5f3e91c9685e092ce9
  
        - name: Enable Extra Platforms In SDK
          shell: bash
-@@ -62,8 +71,6 @@ jobs:
+@@ -62,8 +75,6 @@ jobs:
          shell: bash
          run: ./build.sh --backend --enable-extra-platforms --packages
  
@@ -689,7 +684,7 @@ index ac1573213f6acccaab09b0ff6a01bc79835c6b95..da40606f7abbea5f3e91c9685e092ce9
        - name: Publish win-x64 Test Artifact
          uses: ./.github/actions/publish-test-artifact
          with:
-@@ -82,37 +89,45 @@ jobs:
+@@ -82,37 +93,45 @@ jobs:
            framework: ${{ env.FRAMEWORK }}
            runtime: osx-arm64
  
@@ -743,7 +738,7 @@ index ac1573213f6acccaab09b0ff6a01bc79835c6b95..da40606f7abbea5f3e91c9685e092ce9
  
        - name: Yarn Install
          run: yarn install
-@@ -127,10 +142,11 @@ jobs:
+@@ -127,10 +146,11 @@ jobs:
          run: yarn build --env production
  
        - name: Publish UI Artifact
@@ -756,7 +751,7 @@ index ac1573213f6acccaab09b0ff6a01bc79835c6b95..da40606f7abbea5f3e91c9685e092ce9
  
    unit_test:
      needs: backend
-@@ -151,7 +167,10 @@ jobs:
+@@ -151,7 +171,10 @@ jobs:
      runs-on: ${{ matrix.os }}
      steps:
        - name: Check out
@@ -768,7 +763,7 @@ index ac1573213f6acccaab09b0ff6a01bc79835c6b95..da40606f7abbea5f3e91c9685e092ce9
  
        - name: Test
          uses: ./.github/actions/test
-@@ -166,7 +185,10 @@ jobs:
+@@ -166,7 +189,10 @@ jobs:
      runs-on: ubuntu-latest
      steps:
        - name: Check out
@@ -780,7 +775,7 @@ index ac1573213f6acccaab09b0ff6a01bc79835c6b95..da40606f7abbea5f3e91c9685e092ce9
  
        - name: Test
          uses: ./.github/actions/test
-@@ -202,7 +224,10 @@ jobs:
+@@ -202,7 +228,10 @@ jobs:
      runs-on: ${{ matrix.os }}
      steps:
        - name: Check out
@@ -792,7 +787,7 @@ index ac1573213f6acccaab09b0ff6a01bc79835c6b95..da40606f7abbea5f3e91c9685e092ce9
  
        - name: Test
          uses: ./.github/actions/test
-@@ -216,42 +241,15 @@ jobs:
+@@ -216,42 +245,15 @@ jobs:
            binary_path: ${{ matrix.binary_path }}
  
    deploy:
@@ -1087,12 +1082,52 @@ index d775234db998d0be940a885d7216f4e30a2fee5b..00000000000000000000000000000000
 -          issue-comment: ''
 -          issue-lock-reason: 'resolved'
 -          process-only: ''
+diff --git a/.github/workflows/patch-stack.yml b/.github/workflows/patch-stack.yml
+new file mode 100644
+index 0000000000000000000000000000000000000000..5a6a79f3ef1f0a188641317ad265280f8fa5c576
+--- /dev/null
++++ b/.github/workflows/patch-stack.yml
+@@ -0,0 +1,34 @@
++name: Patch Stack
++
++on:
++  push:
++    branches:
++      - main
++  pull_request:
++    branches:
++      - main
++  workflow_dispatch:
++
++permissions:
++  contents: read
++
++jobs:
++  verify:
++    runs-on: ubuntu-latest
++
++    steps:
++      - name: Check out
++        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
++        with:
++          fetch-depth: 0
++          persist-credentials: false
++
++      - name: Verify Patch Stack
++        shell: bash
++        run: |
++          set -euo pipefail
++          ./scripts/fork/bootstrap-patches.sh
++          if ! git diff --exit-code -- .fork/patches; then
++            echo "Patch stack is stale. Run ./scripts/fork/bootstrap-patches.sh and commit the regenerated .fork/patches files." >&2
++            exit 1
++          fi
 diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
 new file mode 100644
-index 0000000000000000000000000000000000000000..33856643da3cbe26a4ea0f3ce55fe0a8a915244c
+index 0000000000000000000000000000000000000000..fcd82d1aef4a9808271f0b9f9558701ecf2cb63f
 --- /dev/null
 +++ b/.github/workflows/release.yml
-@@ -0,0 +1,279 @@
+@@ -0,0 +1,286 @@
 +name: Release
 +
 +on:
@@ -1227,6 +1262,8 @@ index 0000000000000000000000000000000000000000..33856643da3cbe26a4ea0f3ce55fe0a8
 +      - name: Stage Docker Context
 +        shell: bash
 +        run: |
++          release_version="${{ needs.resolve_version.outputs.release_version }}"
++
 +          for mapping in "amd64:linux-x64" "arm64:linux-arm64"; do
 +            IFS=":" read -r arch runtime <<< "$mapping"
 +            target_dir="Sonarr-$arch"
@@ -1236,6 +1273,11 @@ index 0000000000000000000000000000000000000000..33856643da3cbe26a4ea0f3ce55fe0a8
 +            mkdir -p "$target_dir"
 +            cp -R "$runtime_dir"/. "$target_dir"/
 +            cp -R _output/UI "$target_dir"/UI
++
++            {
++              echo "ReleaseVersion=$release_version"
++              echo "Branch=${{ inputs.branch }}"
++            } > "$target_dir/release_info"
 +          done
 +
 +          find Sonarr-amd64 Sonarr-arm64 \( -name "ffprobe" -o -name "Sonarr" -o -name "Sonarr.Update" \) -exec chmod a+x {} \;
@@ -1251,7 +1293,7 @@ index 0000000000000000000000000000000000000000..33856643da3cbe26a4ea0f3ce55fe0a8
 +        with:
 +          registry: ghcr.io
 +          username: ${{ github.repository_owner }}
-+          password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
++          password: ${{ secrets.GHCR_TOKEN != '' && secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
 +
 +      - name: Compute Image Name
 +        id: image
@@ -1320,7 +1362,7 @@ index 0000000000000000000000000000000000000000..33856643da3cbe26a4ea0f3ce55fe0a8
 +        with:
 +          registry: ghcr.io
 +          username: ${{ github.repository_owner }}
-+          password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
++          password: ${{ secrets.GHCR_TOKEN != '' && secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
 +
 +      - name: Compute Image Name
 +        id: image
@@ -1348,7 +1390,7 @@ index 0000000000000000000000000000000000000000..33856643da3cbe26a4ea0f3ce55fe0a8
 +        with:
 +          registry: ghcr.io
 +          username: ${{ github.repository_owner }}
-+          password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
++          password: ${{ secrets.GHCR_TOKEN != '' && secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
 +
 +      - name: Compute Image Name
 +        id: image
@@ -1374,7 +1416,7 @@ index 0000000000000000000000000000000000000000..33856643da3cbe26a4ea0f3ce55fe0a8
 +          test "$version_digest" = "$latest_digest"
 diff --git a/.github/workflows/repair-latest.yml b/.github/workflows/repair-latest.yml
 new file mode 100644
-index 0000000000000000000000000000000000000000..c6c59fd978aff38e808e7c03ce176570e9c7b872
+index 0000000000000000000000000000000000000000..d7b25de4f7b34e5a9c8ee5c30795bce8f7325b70
 --- /dev/null
 +++ b/.github/workflows/repair-latest.yml
 @@ -0,0 +1,87 @@
@@ -1405,7 +1447,7 @@ index 0000000000000000000000000000000000000000..c6c59fd978aff38e808e7c03ce176570
 +        with:
 +          registry: ghcr.io
 +          username: ${{ github.repository_owner }}
-+          password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
++          password: ${{ secrets.GHCR_TOKEN != '' && secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
 +
 +      - name: Compute Image Name
 +        id: image
@@ -1500,6 +1542,413 @@ index adf5a8c4a0f2ea6c0a34fa62d9a7e3a21a150014..00000000000000000000000000000000
 -          issue-close-reason: 'not planned'
 -          lock-issue: false
 -          issue-lock-reason: 'off-topic'
+diff --git a/.github/workflows/upstream-sync-ci-watch.yml b/.github/workflows/upstream-sync-ci-watch.yml
+new file mode 100644
+index 0000000000000000000000000000000000000000..a4e53c071c4ad3e75e15e9fbbabbcf4d616d8b1e
+--- /dev/null
++++ b/.github/workflows/upstream-sync-ci-watch.yml
+@@ -0,0 +1,80 @@
++name: Upstream Sync CI Watch
++
++on:
++  workflow_run:
++    workflows: ["Build"]
++    types:
++      - completed
++
++permissions:
++  contents: read
++  pull-requests: read
++  issues: write
++
++jobs:
++  report_sync_pr_failure:
++    if: >
++      github.event.workflow_run.conclusion == 'failure' &&
++      startsWith(github.event.workflow_run.head_branch, 'automation/upstream-sync/')
++    runs-on: ubuntu-latest
++
++    steps:
++      - name: Require Sync Bot Token
++        env:
++          SYNC_BOT_TOKEN: ${{ secrets.SYNC_BOT_TOKEN }}
++        shell: bash
++        run: |
++          set -euo pipefail
++          if [[ -z "${SYNC_BOT_TOKEN}" ]]; then
++            echo "Missing required repository secret: SYNC_BOT_TOKEN" >&2
++            exit 1
++          fi
++
++      - name: Open Or Update Blocking Issue
++        env:
++          GH_TOKEN: ${{ secrets.SYNC_BOT_TOKEN }}
++          REPO: ${{ github.repository }}
++          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
++          RUN_URL: ${{ github.event.workflow_run.html_url }}
++        shell: bash
++        run: |
++          set -euo pipefail
++
++          pr_url="$(jq -r '.workflow_run.pull_requests[0].html_url // ""' "$GITHUB_EVENT_PATH")"
++
++          if [[ -z "${pr_url}" ]]; then
++            pr_url="$(gh pr list \
++              --repo "${REPO}" \
++              --head "${HEAD_BRANCH}" \
++              --state open \
++              --json url \
++              --jq '.[0].url // ""')"
++          fi
++
++          issue_title="Upstream sync blocked"
++          issue_body="$(cat <<EOF
++          The upstream sync PR branch is open, but CI is failing.
++
++          - Sync branch: \`${HEAD_BRANCH}\`
++          - Pull request: ${pr_url:-not available}
++          - Failed workflow run: ${RUN_URL}
++
++          Next step: inspect the failing checks on the sync PR, fix the fork delta if needed, then refresh \`.fork/patches\`.
++          EOF
++          )"
++
++          issue_number="$(gh issue list \
++            --repo "${REPO}" \
++            --state open \
++            --search "in:title \"${issue_title}\"" \
++            --json number \
++            --jq '.[0].number // empty')"
++
++          if [[ -n "${issue_number}" ]]; then
++            gh issue edit "${issue_number}" --repo "${REPO}" --title "${issue_title}" --body "${issue_body}"
++          else
++            gh issue create \
++              --repo "${REPO}" \
++              --title "${issue_title}" \
++              --body "${issue_body}"
++          fi
+diff --git a/.github/workflows/upstream-sync.yml b/.github/workflows/upstream-sync.yml
+new file mode 100644
+index 0000000000000000000000000000000000000000..8fdc8e09f1dd441798ee192e5b33f8e65c5fc493
+--- /dev/null
++++ b/.github/workflows/upstream-sync.yml
+@@ -0,0 +1,315 @@
++name: Upstream Sync
++
++on:
++  schedule:
++    - cron: "17 3 * * *"
++  workflow_dispatch:
++    inputs:
++      upstream_ref:
++        description: "Optional upstream Sonarr tag to sync (defaults to the latest release tag)"
++        required: false
++        type: string
++      dry_run:
++        description: "Prepare the sync branch and PR, but do not enable auto-merge"
++        required: false
++        default: false
++        type: boolean
++
++permissions:
++  contents: write
++  pull-requests: write
++  issues: write
++
++concurrency:
++  group: upstream-sync
++  cancel-in-progress: false
++
++jobs:
++  sync:
++    runs-on: ubuntu-latest
++    outputs:
++      skipped: ${{ steps.target.outputs.skipped }}
++      upstream_ref: ${{ steps.target.outputs.upstream_ref }}
++      upstream_version: ${{ steps.target.outputs.upstream_version }}
++      upstream_commit: ${{ steps.target.outputs.upstream_commit }}
++      sync_branch: ${{ steps.branch.outputs.sync_branch }}
++      pr_url: ${{ steps.pr.outputs.pr_url }}
++      failed_patch: ${{ steps.failed_patch.outputs.failed_patch }}
++
++    steps:
++      - name: Require Sync Bot Token
++        env:
++          SYNC_BOT_TOKEN: ${{ secrets.SYNC_BOT_TOKEN }}
++        shell: bash
++        run: |
++          set -euo pipefail
++          if [[ -z "${SYNC_BOT_TOKEN}" ]]; then
++            echo "Missing required repository secret: SYNC_BOT_TOKEN" >&2
++            exit 1
++          fi
++
++      - name: Check out
++        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
++        with:
++          fetch-depth: 0
++          token: ${{ secrets.SYNC_BOT_TOKEN }}
++
++      - name: Configure Git
++        shell: bash
++        run: |
++          git config user.name "sonarr-anime sync bot"
++          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
++
++      - name: Resolve Target Upstream Release
++        id: target
++        env:
++          GH_TOKEN: ${{ secrets.SYNC_BOT_TOKEN }}
++          INPUT_UPSTREAM_REF: ${{ inputs.upstream_ref }}
++        shell: bash
++        run: |
++          set -euo pipefail
++
++          if [[ -n "${INPUT_UPSTREAM_REF}" ]]; then
++            upstream_ref="${INPUT_UPSTREAM_REF}"
++          else
++            upstream_ref="$(gh api repos/Sonarr/Sonarr/releases/latest --jq .tag_name)"
++          fi
++
++          git fetch --force https://github.com/Sonarr/Sonarr.git "${upstream_ref}"
++
++          upstream_commit="$(git rev-parse FETCH_HEAD)"
++          upstream_version="${upstream_ref#v}"
++          current_ref="$(jq -r '.upstream_ref' .fork/upstream.json)"
++
++          echo "upstream_ref=${upstream_ref}" >> "$GITHUB_OUTPUT"
++          echo "upstream_version=${upstream_version}" >> "$GITHUB_OUTPUT"
++          echo "upstream_commit=${upstream_commit}" >> "$GITHUB_OUTPUT"
++
++          if [[ "${current_ref}" == "${upstream_ref}" ]]; then
++            echo "skipped=true" >> "$GITHUB_OUTPUT"
++            {
++              echo "## Upstream Sync"
++              echo
++              echo "- Upstream ref: \`${upstream_ref}\`"
++              echo "- Status: already synced"
++            } >> "$GITHUB_STEP_SUMMARY"
++            exit 0
++          fi
++
++          echo "skipped=false" >> "$GITHUB_OUTPUT"
++
++      - name: Build Sync Branch Name
++        id: branch
++        if: steps.target.outputs.skipped != 'true'
++        env:
++          UPSTREAM_VERSION: ${{ steps.target.outputs.upstream_version }}
++        shell: bash
++        run: |
++          set -euo pipefail
++          echo "sync_branch=automation/upstream-sync/${UPSTREAM_VERSION}" >> "$GITHUB_OUTPUT"
++
++      - name: Create Sync Branch
++        if: steps.target.outputs.skipped != 'true'
++        env:
++          SYNC_BRANCH: ${{ steps.branch.outputs.sync_branch }}
++        shell: bash
++        run: |
++          set -euo pipefail
++          git checkout -B "${SYNC_BRANCH}"
++
++      - name: Prepare Synced Fork Tree
++        if: steps.target.outputs.skipped != 'true'
++        env:
++          UPSTREAM_REF: ${{ steps.target.outputs.upstream_ref }}
++          UPSTREAM_VERSION: ${{ steps.target.outputs.upstream_version }}
++          UPSTREAM_COMMIT: ${{ steps.target.outputs.upstream_commit }}
++        shell: bash
++        run: |
++          set -euo pipefail
++          ./scripts/fork/prepare-upstream-sync.sh "${UPSTREAM_REF}" "${UPSTREAM_VERSION}" "${UPSTREAM_COMMIT}"
++
++      - name: Capture Failed Patch
++        id: failed_patch
++        if: failure()
++        shell: bash
++        run: |
++          set -euo pipefail
++          failed_patch=""
++          if [[ -f .fork/last_failed_patch ]]; then
++            failed_patch="$(cat .fork/last_failed_patch)"
++          fi
++          echo "failed_patch=${failed_patch}" >> "$GITHUB_OUTPUT"
++
++      - name: Commit Sync Changes
++        id: commit
++        if: steps.target.outputs.skipped != 'true'
++        env:
++          UPSTREAM_REF: ${{ steps.target.outputs.upstream_ref }}
++        shell: bash
++        run: |
++          set -euo pipefail
++          git add -A
++
++          if git diff --cached --quiet; then
++            echo "created=false" >> "$GITHUB_OUTPUT"
++            {
++              echo "## Upstream Sync"
++              echo
++              echo "- Upstream ref: \`${UPSTREAM_REF}\`"
++              echo "- Status: no effective changes after patch replay"
++            } >> "$GITHUB_STEP_SUMMARY"
++            exit 0
++          fi
++
++          git commit -m "chore: sync upstream ${UPSTREAM_REF}"
++          echo "created=true" >> "$GITHUB_OUTPUT"
++
++      - name: Push Sync Branch
++        if: steps.target.outputs.skipped != 'true' && steps.commit.outputs.created == 'true'
++        env:
++          SYNC_BRANCH: ${{ steps.branch.outputs.sync_branch }}
++        shell: bash
++        run: |
++          set -euo pipefail
++          git push --force-with-lease origin "${SYNC_BRANCH}"
++
++      - name: Create Or Update Pull Request
++        id: pr
++        if: steps.target.outputs.skipped != 'true' && steps.commit.outputs.created == 'true'
++        env:
++          GH_TOKEN: ${{ secrets.SYNC_BOT_TOKEN }}
++          SYNC_BRANCH: ${{ steps.branch.outputs.sync_branch }}
++          UPSTREAM_REF: ${{ steps.target.outputs.upstream_ref }}
++          UPSTREAM_VERSION: ${{ steps.target.outputs.upstream_version }}
++        shell: bash
++        run: |
++          set -euo pipefail
++
++          existing_pr="$(gh pr list \
++            --base main \
++            --head "${SYNC_BRANCH}" \
++            --state open \
++            --json number,url \
++            --jq '.[0]')"
++
++          title="chore: sync upstream ${UPSTREAM_REF}"
++          body="$(cat <<EOF
++          ## Summary
++
++          - sync upstream Sonarr release \`${UPSTREAM_REF}\`
++          - replay the maintained sonarr-anime patch stack
++          - publish via the normal \`main\` release workflow after merge
++          EOF
++          )"
++
++          if [[ -n "${existing_pr}" && "${existing_pr}" != "null" ]]; then
++            pr_number="$(jq -r '.number' <<< "${existing_pr}")"
++            pr_url="$(jq -r '.url' <<< "${existing_pr}")"
++            gh pr edit "${pr_number}" --title "${title}" --body "${body}"
++          else
++            pr_url="$(gh pr create \
++              --base main \
++              --head "${SYNC_BRANCH}" \
++              --title "${title}" \
++              --body "${body}")"
++            pr_number="$(gh pr view "${pr_url}" --json number --jq .number)"
++          fi
++
++          echo "pr_url=${pr_url}" >> "$GITHUB_OUTPUT"
++          echo "pr_number=${pr_number}" >> "$GITHUB_OUTPUT"
++
++      - name: Enable Auto-Merge
++        if: steps.pr.outputs.pr_number != '' && inputs.dry_run != true
++        env:
++          GH_TOKEN: ${{ secrets.SYNC_BOT_TOKEN }}
++          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
++        shell: bash
++        run: |
++          set -euo pipefail
++          gh pr merge "${PR_NUMBER}" --auto --squash
++
++      - name: Close Blocking Issue On Sync Success
++        if: steps.pr.outputs.pr_number != ''
++        env:
++          GH_TOKEN: ${{ secrets.SYNC_BOT_TOKEN }}
++          REPO: ${{ github.repository }}
++        shell: bash
++        run: |
++          set -euo pipefail
++
++          issue_number="$(gh issue list \
++            --repo "${REPO}" \
++            --state open \
++            --search 'in:title "Upstream sync blocked"' \
++            --json number \
++            --jq '.[0].number // empty')"
++
++          if [[ -n "${issue_number}" ]]; then
++            gh issue close "${issue_number}" \
++              --repo "${REPO}" \
++              --comment "Closing after a new upstream sync PR was created successfully."
++          fi
++
++      - name: Summarize Sync
++        if: steps.target.outputs.skipped != 'true' && steps.pr.outputs.pr_url != ''
++        env:
++          UPSTREAM_REF: ${{ steps.target.outputs.upstream_ref }}
++          PR_URL: ${{ steps.pr.outputs.pr_url }}
++        shell: bash
++        run: |
++          set -euo pipefail
++          {
++            echo "## Upstream Sync"
++            echo
++            echo "- Upstream ref: \`${UPSTREAM_REF}\`"
++            echo "- Pull request: ${PR_URL}"
++          } >> "$GITHUB_STEP_SUMMARY"
++
++  report_sync_failure:
++    runs-on: ubuntu-latest
++    needs: sync
++    if: always() && needs.sync.result == 'failure'
++
++    steps:
++      - name: Open Or Update Blocking Issue
++        env:
++          GH_TOKEN: ${{ secrets.SYNC_BOT_TOKEN }}
++          REPO: ${{ github.repository }}
++          UPSTREAM_REF: ${{ needs.sync.outputs.upstream_ref }}
++          UPSTREAM_VERSION: ${{ needs.sync.outputs.upstream_version }}
++          UPSTREAM_COMMIT: ${{ needs.sync.outputs.upstream_commit }}
++          FAILED_PATCH: ${{ needs.sync.outputs.failed_patch }}
++          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
++        shell: bash
++        run: |
++          set -euo pipefail
++
++          issue_title="Upstream sync blocked"
++          issue_body="$(cat <<EOF
++          The daily upstream sync needs manual help.
++
++          - Upstream ref: \`${UPSTREAM_REF:-unknown}\`
++          - Upstream version: \`${UPSTREAM_VERSION:-unknown}\`
++          - Upstream commit: \`${UPSTREAM_COMMIT:-unknown}\`
++          - Failed patch: \`${FAILED_PATCH:-unknown}\`
++          - Workflow run: ${RUN_URL}
++
++          Next step: inspect the failing patch, update the fork changes as needed, then regenerate \`.fork/patches\` with \`./scripts/fork/bootstrap-patches.sh\`.
++          EOF
++          )"
++
++          issue_number="$(gh issue list \
++            --repo "${REPO}" \
++            --state open \
++            --search "in:title \"${issue_title}\"" \
++            --json number \
++            --jq '.[0].number // empty')"
++
++          if [[ -n "${issue_number}" ]]; then
++            gh issue edit "${issue_number}" --repo "${REPO}" --title "${issue_title}" --body "${issue_body}"
++          else
++            gh issue create \
++              --repo "${REPO}" \
++              --title "${issue_title}" \
++              --body "${issue_body}"
++          fi
 diff --git a/.gitignore b/.gitignore
 index d17209556c8e83ed6325dc69ab706627c1841802..0bce041cd7f7ce6b9484eec7d1147db7a1c13827 100644
 --- a/.gitignore
@@ -1707,10 +2156,10 @@ index 0000000000000000000000000000000000000000..9b84b6bc113a65e1de50642fc9682fb3
 +
 +ENTRYPOINT ["./Sonarr", "-nobrowser", "-data=/config"]
 diff --git a/README.md b/README.md
-index d43366f93602498d9d0c626271435553ca454355..df5755cb0ab9813c913f95fb6d4ffee8ce3f1b38 100644
+index d43366f93602498d9d0c626271435553ca454355..50d347957fd815f1e3f781aa0b001e0e64fd4678 100644
 --- a/README.md
 +++ b/README.md
-@@ -1,85 +1,184 @@
+@@ -1,85 +1,48 @@
 -# <img width="24px" src="./Logo/256.png" alt="Sonarr"></img> Sonarr
 +# sonarr-anime
  
@@ -1720,51 +2169,37 @@ index d43366f93602498d9d0c626271435553ca454355..df5755cb0ab9813c913f95fb6d4ffee8
 -[![Mega Sponsors on Open Collective](https://opencollective.com/Sonarr/megasponsors/badge.svg)](#mega-sponsors)
 +[![Build](https://github.com/RemingtonDev/sonarr-anime/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/RemingtonDev/sonarr-anime/actions/workflows/build.yml)
 +[![GitHub Release](https://img.shields.io/github/v/release/RemingtonDev/sonarr-anime)](https://github.com/RemingtonDev/sonarr-anime/releases/latest)
-+[![GHCR Image](https://img.shields.io/badge/ghcr.io-sonarr--anime-blue)](https://github.com/RemingtonDev/sonarr-anime/pkgs/container/sonarr-anime)
  
 -Sonarr is a PVR for Usenet and BitTorrent users. It can monitor multiple RSS feeds for new episodes of your favorite shows and will grab, sort and rename them. It can also be configured to automatically upgrade the quality of files already downloaded when a better quality format becomes available.
-+A minimal [Sonarr](https://github.com/Sonarr/Sonarr) v4 fork focused on reducing redundant anime search queries. It patches the search pipeline to try pack search first, season search second, and per-episode only as a last resort.
++sonarr-anime is a minimal [Sonarr](https://github.com/Sonarr/Sonarr) v4 fork for anime fans who already like Sonarr but want a better anime search experience. It keeps Sonarr behaving like Sonarr, while improving anime search so it can find packs first and avoid hammering indexers with episode-by-episode queries when a batch release already covers what you need.
  
 -## Getting Started
-+## What this fork does
++## Why this fork exists
  
 -- [Download/Installation](https://sonarr.tv/#downloads-v3)
 -- [FAQ](https://wiki.servarr.com/sonarr/faq)
 -- [Wiki](https://wiki.servarr.com/Sonarr)
 -- [v4 Beta API Documentation](https://sonarr.tv/docs/api)
 -- [Donate](https://sonarr.tv/donate)
-+Upstream Sonarr's anime search always falls through to per-episode queries — one HTTP request per episode — creating unnecessary load on genre-oriented indexers. This fork inserts intelligent early-exit checks into the search cascade:
++Upstream Sonarr is the right choice for almost everything, but anime releases often show up in season packs, batch packs, specials, and naming styles that make a pack-first approach especially useful. This fork focuses on that narrow problem and nothing more.
  
 -## Support
-+1. **Pack search** — if an approved release covers all wanted episodes across seasons, stop immediately
-+2. **Season search** — per season, if an approved release covers all wanted episodes, skip its episodes
-+3. **Per-episode search** — only for episodes not covered by steps 1-2
- 
+-
 -Note: GitHub Issues are for Bugs and Feature Requests Only
-+Additional capabilities:
-+- **Multi-season pack support** — recognizes `S01-S04` range and `S01+S02+S03+S04` list formats, uses them to skip later-season queries
-+- **Bare-title pack matching** — during anime season search, releases like `[Group] Example Anime Title [1080p]` can be matched as Season 1 even when they include no episode numbers, no `S01`, and no `Season 1`, as long as they are just the series title plus safe trailing metadata
-+- **Anime specials/OVAs** — Season 0 searches use OVA/Special-aware query generation instead of the pack fallback
-+- **Bare-title + OVA matching** — releases with inline alternate-title parentheses and trailing metadata are correctly recognized during Season 0 special search
-+- **S01+Specials co-coverage** — when a season pack explicitly advertises special content (e.g. `S01+Specials`, `S01+OVA`), the pack maps both the season episodes and exactly one wanted Season 0 special, allowing the S00 search to be skipped entirely
-+- **Pack-first parity across supported backends** — protocol-backed search backends emit a broad title-only query before season-specific queries, matching the native pack-first behavior. Cross-season dedup prevents the same broad query from being sent twice
-+- **Grab history fallback for unparseable titles** — when a download completes with a title that cannot be parsed (common for some anime packs), the fork falls back to the original grab history to identify the series and episodes. This prevents automatic imports from being blocked for releases already validated and approved during the search phase.
- 
+-
 -- [Forums](https://forums.sonarr.tv/)
 -- [Discord](https://discord.gg/M6BvZn5)
 -- [GitHub - Bugs and Feature Requests Only](https://github.com/Sonarr/Sonarr/issues)
 -- [IRC](https://web.libera.chat/?channels=#sonarr)
 -- [Reddit](https://www.reddit.com/r/sonarr)
 -- [Wiki](https://wiki.servarr.com/sonarr)
-+## What this fork does not do
- 
+-
 -## Features
-+- **Not a full product divergence.** The UI, library management, indexer configuration, download clients, quality profiles, and all non-anime search behavior are identical to upstream Sonarr v4.
-+- **Not a replacement for upstream support.** Bugs or questions about general Sonarr behavior (import, notifications, database, API) should go to [upstream Sonarr](https://github.com/Sonarr/Sonarr).
-+- **Some backend variants remain lightly tested.** Validation so far has focused on accessible indexers and standard protocol-backed backends. Non-standard implementations may behave differently.
- 
+-
 -### Current Features
-+## Example behavior
++- **Pack-first anime search** helps reduce redundant queries by trying broad anime pack matches before falling back to individual episode searches.
++- **Better anime pack handling** improves matching for common batch release formats, including multi-season packs and anime specials/OVAs.
++- **Minimal fork scope** keeps the rest of the experience familiar for people who already use Sonarr and just want better anime search behavior.
  
 -- Support for major platforms: Windows, Linux, macOS, Raspberry Pi, etc.
 -- Automatically detects new episodes
@@ -1777,179 +2212,65 @@ index d43366f93602498d9d0c626271435553ca454355..df5755cb0ab9813c913f95fb6d4ffee8
 -- Full integration with Kodi, Plex (notification, library update, metadata)
 -- Full support for specials and multi-episode releases
 -- And a beautiful UI
-+Illustrative example only:
++## What stays the same
  
 -## Contributing
-+| Series | Seasons | Episodes | Queries (fork example) | Queries (upstream-style example) | Per-episode fallbacks |
-+|--------|---------|----------|------------------------|----------------------------------|-----------------------|
-+| Anime Title | S01-S04 | 96 | 2 | ~104 | 0 |
-+| Anime Title: Season 1 | S01 | 12 | 6 | ~15 | 0 |
-+| Anime Title: Long Season | S01 | 26 | 3 | ~29 | 0 |
++This is not a reinvention of Sonarr. The goal is to keep the fork close to upstream Sonarr and limit changes to the anime-specific search path.
  
 -### Development
-+The goal is simple: if a broad pack or season pack already covers the wanted episodes, the fork avoids sending unnecessary per-episode searches afterward. Actual results depend on indexer behavior and available releases.
++The UI, library management, download clients, quality profiles, indexer configuration, and non-anime behavior are intended to stay effectively upstream. In practice, this fork should feel like stock Sonarr for everything except the anime search improvements it was created to add. The promise here is simple: better anime search, with minimal impact on the codebase and on the day-to-day Sonarr experience you already know.
  
 -This project exists thanks to all the people who contribute. [Contribute](CONTRIBUTING.md).
-+## Tested paths
++## Tested and compatibility
  
 -<a href="https://github.com/Sonarr/Sonarr/graphs/contributors"><img src="https://opencollective.com/Sonarr/contributors.svg?width=890&button=false" /></a>
-+| Test path | Command | What it validates |
-+|-----------|---------|-------------------|
-+| Direct indexer path | `/test-e2e [series] [seasons]` | Pack-first cascade, broad query suppression, episode skip logic |
-+| Aggregator-backed path | `/test-e2e-prowlarr [series] [seasons]` | Same cascade behavior through a protocol-backed path |
-+| CI unit tests | Automatic on push/PR | Core test suite across Windows, macOS, and Linux |
-+| CI unit tests (Postgres) | Automatic on push/PR | Core test suite on Ubuntu with Postgres environment enabled |
-+| CI integration tests | Automatic on push/PR | Full integration test matrix across Windows, macOS, and Linux |
++This fork has been tested on anime indexers through Prowlarr, with the focus on the kinds of public anime-oriented sources where pack releases are common and query efficiency matters.
  
 -### Supporters
-+**Note on query counts:** Native indexer implementations can be leaner than protocol-backed paths, which may also emit identifier-based and title-variant queries. The acceptance criteria are broad-first ordering, cross-season suppression, and cascade/skip behavior, not identical query totals across every backend.
++That means the current validation is strongest for anime indexers and Prowlarr-backed setups. Private trackers have not been broadly validated yet, so they should be treated as possible but not guaranteed. If you run into compatibility issues, reports are welcome. Debug logs are especially helpful, and if a private tracker needs fork-specific fixes, that work can be planned if logs are provided or testing access is shared.
  
 -This project would not be possible without the support of our users and software providers.
 -[**Become a sponsor or backer**](https://opencollective.com/sonarr) to help us out!
-+## Known limitations
++## Keeping up with Sonarr
  
 -#### Mega Sponsors
-+- Fork tracks Sonarr v4 (current stable) only; v5/develop is not targeted
-+- Pack detection depends on release title parsing — unusual naming conventions may not be recognized
-+- Protocol-backed indexers with non-standard search parameter support may not benefit from broad-first ordering
-+- Multi-season coverage still depends on what a given indexer exposes for the searched title
++Sonarr is the upstream project, and this fork is downstream from it. sonarr-anime tracks upstream Sonarr v4 stable releases rather than trying to become a separate product line.
  
 -[![Sponsors](https://opencollective.com/sonarr/tiers/mega-sponsor.svg?width=890)](https://opencollective.com/sonarr/contribute/mega-sponsor-21443/checkout)
-+## Install
++When upstream Sonarr ships a new stable release, this repository syncs that release and reapplies the small set of anime-specific changes on top. That keeps the fork easier to review, easier to maintain, and much closer to upstream Sonarr than a broad long-term divergence would be.
  
 -#### Sponsors
-+### GitHub release archives
++## Get it
  
 -[![Flexible Sponsors](https://opencollective.com/sonarr/sponsors.svg?width=890)](https://opencollective.com/sonarr/contribute/sponsor-21457/checkout)
-+Download the latest release from the [Releases page](https://github.com/RemingtonDev/sonarr-anime/releases/latest). Releases are published with version tags such as `v4.0.17.812`. Archives are available for Linux (x64, arm, arm64), macOS (x64, arm64), Windows (x64, x86), and FreeBSD.
++Download release builds from the [GitHub Releases page](https://github.com/RemingtonDev/sonarr-anime/releases/latest).
  
 -#### Backers
-+Extract and run like stock Sonarr — the binary is a drop-in replacement.
++Container images are published at [ghcr.io/remingtondev/sonarr-anime](https://github.com/RemingtonDev/sonarr-anime/pkgs/container/sonarr-anime).
  
 -[![Backers](https://opencollective.com/sonarr/backers.svg?width=890)](https://opencollective.com/sonarr/contribute/backer-21442/checkout)
-+### Docker
- 
+-
 -#### JetBrains
-+Public images are available on GitHub Container Registry (GHCR):
- 
+-
 -Thank you to [<img src="https://resources.jetbrains.com/storage/products/company/brand/logos/jetbrains.png" alt="JetBrains" width="96">](http://www.jetbrains.com/) for providing us with free licenses to their great tools
-+```
-+ghcr.io/remingtondev/sonarr-anime
-+```
- 
+-
 -[<img src="https://resources.jetbrains.com/storage/products/company/brand/logos/TeamCity.png" alt="TeamCity" width="64">](http://www.jetbrains.com/teamcity/)
-+Supported architectures: `linux/amd64` and `linux/arm64`.
- 
+-
 -[<img src="https://resources.jetbrains.com/storage/products/company/brand/logos/ReSharper.png" alt="ReSharper" width="64">](http://www.jetbrains.com/resharper/)
-+### Docker quick start
++## Support
  
 -[<img src="https://resources.jetbrains.com/storage/products/company/brand/logos/dotTrace.png" alt="dotTrace" width="64">](http://www.jetbrains.com/dottrace/)
-+**docker run:**
++Issues and PRs are welcome for anime-search regressions, anime indexer compatibility, and other fork-specific behavior. If something breaks, a bug report with debug logs is the most useful starting point.
  
 -[<img src="https://resources.jetbrains.com/storage/products/company/brand/logos/Rider.png" alt="Rider" width="64">](http://www.jetbrains.com/rider/)
-+```bash
-+docker run -d \
-+  --name sonarr-anime \
-+  -p 8989:8989 \
-+  -v /path/to/config:/config \
-+  -v /path/to/tv:/tv \
-+  -v /path/to/downloads:/downloads \
-+  ghcr.io/remingtondev/sonarr-anime:latest
-+```
++If a private tracker needs testing, fixes can still be planned. Logs are helpful, and if hands-on testing is needed, sharing an invite or test access can make that possible. For general Sonarr questions or non-anime behavior, the best place is still the [upstream Sonarr community](https://wiki.servarr.com/sonarr).
  
 -### Licenses
-+**docker compose:**
++## License
  
 -- [GNU GPL v3](http://www.gnu.org/licenses/gpl.html)
 -- Copyright 2010-2024
-+```yaml
-+services:
-+  sonarr:
-+    image: ghcr.io/remingtondev/sonarr-anime:latest
-+    container_name: sonarr-anime
-+    ports:
-+      - "8989:8989"
-+    volumes:
-+      - ./config:/config
-+      - /path/to/tv:/tv
-+      - /path/to/downloads:/downloads
-+    restart: unless-stopped
-+```
-+
-+### NAS / self-hosted container platforms
-+
-+The public images support `amd64` and `arm64`, covering Synology, QNAP, Unraid, and similar NAS platforms.
-+
-+Required mounts:
-+
-+| Mount | Purpose |
-+|-------|---------|
-+| `/config` | Sonarr configuration, database, and logs. Persists across container restarts. |
-+| `/tv` | TV library root folder. Must match what you configure inside Sonarr. |
-+| `/downloads` | Download client output. Must be accessible to both Sonarr and your download client. |
-+
-+For conservative installs, pin to an exact release tag such as `4.0.17.812`. Use `latest` only if you want the current stable build.
-+
-+**Upgrading:**
-+
-+1. Stop the container
-+2. Pull the new image (`docker pull ghcr.io/remingtondev/sonarr-anime:latest`)
-+3. Restart with the same mounted `/config`
-+
-+Your configuration and database are preserved in the `/config` volume.
-+
-+## Versioning
-+
-+Releases use Sonarr's normal numeric build versioning.
-+The About page also shows this fork's `releaseVersion`, which is the fork-specific release identifier surfaced alongside the normal upstream-style app versioning.
-+
-+Example:
-+
-+- GitHub release tag: `v4.0.17.812`
-+- Docker image tag: `4.0.17.812`
-+
-+Successful `main` builds publish:
-+
-+- a GitHub Release tagged `v<version>`
-+- packaged release archives
-+- a GHCR image tagged `<version>`
-+- `latest` after the matching GitHub Release has been created successfully
-+
-+## Image tags
-+
-+| Tag | Source | Description |
-+|-----|--------|-------------|
-+| `latest` | `main` | Alias for the most recent successful GitHub Release |
-+| `4.0.17.812` | `main` | Pinned image tag for a specific published release |
-+
-+Stable releases come from `main`.
-+
-+## Security
-+
-+This is an independent fork, not the official Sonarr distribution. It is not affiliated with or endorsed by the Sonarr project.
-+
-+See [SECURITY.md](SECURITY.md) for how to report vulnerabilities in fork-owned code and release infrastructure.
-+
-+## Support expectations
-+
-+Issues are welcome for:
-+- Reproducible anime-search regressions (pack cascade, query counts, parser failures)
-+- Indexer compatibility reports for genre-oriented indexers and protocol-backed backends
-+- Fork-owned workflow, docs, or release problems
-+
-+For general Sonarr support (UI, import, notifications, download clients, database), please use the [upstream Sonarr community](https://wiki.servarr.com/sonarr). This fork does not change those features.
-+
-+## Upstream sync
-+
-+This fork tracks Sonarr v4 and is rebased onto upstream manually when needed. There is no automatic sync PR flow; upstream changes are reviewed and merged deliberately to keep the fork surface small.
-+
-+## For developers
-+
-+- [Contributing guide](CONTRIBUTING.md) — how to contribute to this fork
-+
-+## License
-+
-+Same as upstream Sonarr — [GNU GPL v3](http://www.gnu.org/licenses/gpl.html).
++Same as upstream Sonarr: [GNU GPL v3](http://www.gnu.org/licenses/gpl.html).
 diff --git a/SECURITY.md b/SECURITY.md
 index a534ff2fb09dc18c294502bee17a7d9223d6fed4..6b1ae358f5bffcc01b7d8a37e14fb91d03b036e9 100644
 --- a/SECURITY.md
@@ -1978,7 +2299,7 @@ index a534ff2fb09dc18c294502bee17a7d9223d6fed4..6b1ae358f5bffcc01b7d8a37e14fb91d
 +- General Sonarr vulnerabilities unrelated to this fork's patches — report those to upstream Sonarr
 +- Feature requests or bug reports — use the [issue templates](https://github.com/RemingtonDev/sonarr-anime/issues/new/choose)
 diff --git a/build.sh b/build.sh
-index ee59d2f6176573c2faaea58ba3acd06f0e8f3dc8..92d2317f89b6307e9b68a032e01b0dd599d5676f 100755
+index ee59d2f6176573c2faaea58ba3acd06f0e8f3dc8..8c387e5d1cc547eca7dc00fd206f2ff4dc19d7e1 100755
 --- a/build.sh
 +++ b/build.sh
 @@ -20,11 +20,13 @@ ProgressEnd()
@@ -1999,7 +2320,36 @@ index ee59d2f6176573c2faaea58ba3acd06f0e8f3dc8..92d2317f89b6307e9b68a032e01b0dd5
      fi
  }
  
-@@ -275,6 +277,7 @@ UploadTestArtifacts()
+@@ -117,6 +119,28 @@ PackageFiles()
+ 
+     echo "Adding LICENSE"
+     cp LICENSE.md $folder
++
++    WriteReleaseInfo "$folder"
++}
++
++WriteReleaseInfo()
++{
++    local folder="$1"
++    local releaseVersion="${RELEASE_VERSION:-${APP_VERSION:-$SONARR_VERSION}}"
++    local releaseInfoPath="$folder/release_info"
++
++    if [ -z "$releaseVersion" ]; then
++        return
++    fi
++
++    echo "Writing release_info"
++    {
++        echo "ReleaseVersion=$releaseVersion"
++
++        if [ -n "$BRANCH" ]; then
++            echo "Branch=$BRANCH"
++        fi
++    } > "$releaseInfoPath"
+ }
+ 
+ PackageLinux()
+@@ -275,6 +299,7 @@ UploadTestArtifacts()
  UploadArtifacts()
  {
      local framework="$1"
@@ -2007,7 +2357,7 @@ index ee59d2f6176573c2faaea58ba3acd06f0e8f3dc8..92d2317f89b6307e9b68a032e01b0dd5
  
      ProgressStart 'Publishing Artifacts'
  
-@@ -283,7 +286,7 @@ UploadArtifacts()
+@@ -283,7 +308,7 @@ UploadArtifacts()
      do
          local runtime=$(basename "$dir")
  
