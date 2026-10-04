@@ -612,7 +612,7 @@ index dfd8ce0e25929d24df72dbb93ab1c9d9fd4513b0..00000000000000000000000000000000
 -            echo "No changes since last run"
 -          fi
 diff --git a/.github/workflows/build.yml b/.github/workflows/build.yml
-index 7e4f081a2c854b86eb7f8c3cf8d1a752e760ab6f..e85dd067fb849e717e683ef35a4e2685b5ebda2f 100644
+index 0a47bc994e202f089f748e6a7dbbc535c4ee3363..bd5e2ed8682aae31f2677bb5f786e9dca74d4733 100644
 --- a/.github/workflows/build.yml
 +++ b/.github/workflows/build.yml
 @@ -10,9 +10,14 @@ on:
@@ -2710,10 +2710,10 @@ index 53f35921eb543dcc76b67e45962afb86ce6c3b0f..a89cfc703a6a8df6de6167b25812fff8
          public DatabaseType DatabaseType { get; set; }
      }
 diff --git a/src/Sonarr.Api.V3/openapi.json b/src/Sonarr.Api.V3/openapi.json
-index 6ac128ffd5bd37278762eb0c46287b4516356c57..015c9d2f2ab69abf9c9a10064ab10aed3be4f89a 100644
+index f334da87c930e805272b9e103982eddf6bb9335e..535915af40545564487a487b30ed70f340df8bc7 100644
 --- a/src/Sonarr.Api.V3/openapi.json
 +++ b/src/Sonarr.Api.V3/openapi.json
-@@ -12134,6 +12134,10 @@
+@@ -12142,6 +12142,10 @@
              "type": "string",
              "nullable": true
            },
@@ -2724,7 +2724,7 @@ index 6ac128ffd5bd37278762eb0c46287b4516356c57..015c9d2f2ab69abf9c9a10064ab10aed
            "databaseVersion": {
              "type": "string",
              "nullable": true
-@@ -12480,4 +12484,4 @@
+@@ -12488,4 +12492,4 @@
        "apikey": [ ]
      }
    ]

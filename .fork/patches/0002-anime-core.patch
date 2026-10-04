@@ -1662,10 +1662,10 @@ index 7cbff94f197eef72b9c526355c486170225ca038..2d7b2dc31a1a92bf0d7343bb66d0a1a0
          {
              if (searchCriteria != null)
 diff --git a/src/NzbDrone.Host/Startup.cs b/src/NzbDrone.Host/Startup.cs
-index 425ec014f90d60811f8459a7c4d8b9ff686e131f..cb90204cbce251c7a44a501b9f370f655deffb0a 100644
+index 600c4154867f8587bfc12b9ea5c232e4641bb205..f3d8bf26882379303c5c10989e43afff8dcd46aa 100644
 --- a/src/NzbDrone.Host/Startup.cs
 +++ b/src/NzbDrone.Host/Startup.cs
-@@ -238,7 +238,14 @@ public void Configure(IApplicationBuilder app,
+@@ -231,7 +231,14 @@ public void Configure(IApplicationBuilder app,
  
              if (OsInfo.IsNotWindows)
              {
