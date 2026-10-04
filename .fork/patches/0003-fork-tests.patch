@@ -3412,7 +3412,7 @@ index 60c6f901cd9a795d8c2572857cf0b602679be8a1..2660db2e4834606458cb1c25e96e02ec
    </ItemGroup>
    <ItemGroup>
 diff --git a/src/NzbDrone.Test.Common/NzbDroneRunner.cs b/src/NzbDrone.Test.Common/NzbDroneRunner.cs
-index 25f977fce10a74ec466ee0f8a098d77772af6ee7..11f20a88ffd8d6ac68a8f7b2e187e8cca492f5d0 100644
+index dad71b24f6b8fc686cdfdc07a2fd7092ba09ba48..c11f8ec82c10820f6a5ca5835d41d6351446872a 100644
 --- a/src/NzbDrone.Test.Common/NzbDroneRunner.cs
 +++ b/src/NzbDrone.Test.Common/NzbDroneRunner.cs
 @@ -177,6 +177,7 @@ private void GenerateConfigFile(bool enableAuth)
