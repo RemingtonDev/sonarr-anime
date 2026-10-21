@@ -19,6 +19,11 @@ on:
         description: "Sonarr app version"
         required: true
         type: string
+      verify_public_trust:
+        description: "Qualify actual release clients against the incident endpoints"
+        required: false
+        default: false
+        type: boolean
     secrets:
       GHCR_TOKEN:
         required: false
@@ -171,12 +176,26 @@ jobs:
         run: |
           echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
+      - name: Set up trust probe compiler
+        if: ${{ inputs.verify_public_trust }}
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: 6.0.428
+
+      - name: Compile application HTTPS trust probe
+        if: ${{ inputs.verify_public_trust }}
+        shell: bash
+        run: |
+          dotnet publish scripts/security/TrustProbe/TrustProbe.csproj -c Release \
+            -p:SonarrBinaryDirectory="$PWD/Sonarr-amd64" -o "$RUNNER_TEMP/sonarr-trust-probe"
+
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile.release
           platforms: linux/amd64,linux/arm64
+          pull: true
           push: true
           tags: |
             ${{ steps.image.outputs.name }}:${{ needs.resolve_version.outputs.release_version }}
@@ -187,6 +206,23 @@ jobs:
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.version=${{ needs.resolve_version.outputs.release_version }}
             org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Verify application HTTPS trust in both release images
+        if: ${{ inputs.verify_public_trust }}
+        shell: bash
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+          RELEASE_VERSION: ${{ needs.resolve_version.outputs.release_version }}
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            # Overlay only the managed entry assembly in a disposable container.
+            # The actual Sonarr apphost, self-contained runtime, dependencies,
+            # dispatcher/validation classes and image OS trust stay in use.
+            docker run --rm --platform "linux/$arch" --entrypoint /opt/sonarr/Sonarr \
+              -v "$RUNNER_TEMP/sonarr-trust-probe/TrustProbe.dll:/opt/sonarr/Sonarr.dll:ro" \
+              "$IMAGE_NAME:$RELEASE_VERSION"
+          done
 
   release:
     needs: [resolve_version, package, docker]

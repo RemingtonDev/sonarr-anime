@@ -612,10 +612,10 @@ index dfd8ce0e25929d24df72dbb93ab1c9d9fd4513b0..00000000000000000000000000000000
 -            echo "No changes since last run"
 -          fi
 diff --git a/.github/workflows/build.yml b/.github/workflows/build.yml
-index 0a47bc994e202f089f748e6a7dbbc535c4ee3363..bd5e2ed8682aae31f2677bb5f786e9dca74d4733 100644
+index 0a47bc994e202f089f748e6a7dbbc535c4ee3363..3e3f253afaa74f7d6173c430dde4d8fb8b191a62 100644
 --- a/.github/workflows/build.yml
 +++ b/.github/workflows/build.yml
-@@ -10,9 +10,14 @@ on:
+@@ -10,9 +10,20 @@ on:
    pull_request:
      branches:
        - develop
@@ -624,13 +624,19 @@ index 0a47bc994e202f089f748e6a7dbbc535c4ee3363..bd5e2ed8682aae31f2677bb5f786e9dc
        - "src/NzbDrone.Core/Localization/Core/**"
        - "src/Sonarr.Api.*/openapi.json"
 +  workflow_dispatch:
++    inputs:
++      verify_public_trust:
++        description: "Qualify release images against incident test endpoints"
++        required: false
++        default: false
++        type: boolean
 +
 +permissions:
 +  contents: read
  
  concurrency:
    group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-@@ -30,29 +35,37 @@ jobs:
+@@ -30,29 +41,37 @@ jobs:
      outputs:
        framework: ${{ steps.variables.outputs.framework }}
        major_version: ${{ steps.variables.outputs.major_version }}
@@ -675,7 +681,7 @@ index 0a47bc994e202f089f748e6a7dbbc535c4ee3363..bd5e2ed8682aae31f2677bb5f786e9dc
  
        - name: Enable Extra Platforms In SDK
          shell: bash
-@@ -62,8 +75,6 @@ jobs:
+@@ -62,8 +81,6 @@ jobs:
          shell: bash
          run: ./build.sh --backend --enable-extra-platforms --packages
  
@@ -684,7 +690,7 @@ index 0a47bc994e202f089f748e6a7dbbc535c4ee3363..bd5e2ed8682aae31f2677bb5f786e9dc
        - name: Publish win-x64 Test Artifact
          uses: ./.github/actions/publish-test-artifact
          with:
-@@ -82,37 +93,45 @@ jobs:
+@@ -82,37 +99,61 @@ jobs:
            framework: ${{ env.FRAMEWORK }}
            runtime: osx-arm64
  
@@ -724,6 +730,9 @@ index 0a47bc994e202f089f748e6a7dbbc535c4ee3363..bd5e2ed8682aae31f2677bb5f786e9dc
  
    frontend:
      runs-on: ubuntu-latest
++    env:
++      NODE_OPTIONS: --use-openssl-ca
++      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
      steps:
        - name: Check out
 -        uses: actions/checkout@v4
@@ -731,14 +740,27 @@ index 0a47bc994e202f089f748e6a7dbbc535c4ee3363..bd5e2ed8682aae31f2677bb5f786e9dc
 +        with:
 +          persist-credentials: false
 +          fetch-depth: 1
++
++      - name: Refresh frontend HTTPS trust
++        shell: bash
++        run: |
++          set -euo pipefail
++          sudo apt-get update
++          sudo apt-get install -y --only-upgrade ca-certificates
++          . /etc/os-release
++          dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge "20260816ubuntu0.${VERSION_ID}.1"
  
        - name: Volta
 -        uses: volta-cli/action@v4
 +        uses: volta-cli/action@5c175f92dea6f48441c436471e6479dbc192e194 # v4
++
++      - name: Verify frontend Node HTTPS trust
++        if: ${{ inputs.verify_public_trust }}
++        run: node scripts/security/verify-node-trust.mjs
  
        - name: Yarn Install
          run: yarn install
-@@ -127,10 +146,11 @@ jobs:
+@@ -127,10 +168,11 @@ jobs:
          run: yarn build --env production
  
        - name: Publish UI Artifact
@@ -751,7 +773,7 @@ index 0a47bc994e202f089f748e6a7dbbc535c4ee3363..bd5e2ed8682aae31f2677bb5f786e9dc
  
    unit_test:
      needs: backend
-@@ -151,7 +171,10 @@ jobs:
+@@ -151,7 +193,10 @@ jobs:
      runs-on: ${{ matrix.os }}
      steps:
        - name: Check out
@@ -763,7 +785,7 @@ index 0a47bc994e202f089f748e6a7dbbc535c4ee3363..bd5e2ed8682aae31f2677bb5f786e9dc
  
        - name: Test
          uses: ./.github/actions/test
-@@ -166,7 +189,10 @@ jobs:
+@@ -166,7 +211,10 @@ jobs:
      runs-on: ubuntu-latest
      steps:
        - name: Check out
@@ -775,7 +797,7 @@ index 0a47bc994e202f089f748e6a7dbbc535c4ee3363..bd5e2ed8682aae31f2677bb5f786e9dc
  
        - name: Test
          uses: ./.github/actions/test
-@@ -202,7 +228,10 @@ jobs:
+@@ -202,7 +250,10 @@ jobs:
      runs-on: ${{ matrix.os }}
      steps:
        - name: Check out
@@ -787,7 +809,7 @@ index 0a47bc994e202f089f748e6a7dbbc535c4ee3363..bd5e2ed8682aae31f2677bb5f786e9dc
  
        - name: Test
          uses: ./.github/actions/test
-@@ -216,42 +245,15 @@ jobs:
+@@ -216,42 +267,16 @@ jobs:
            binary_path: ${{ matrix.binary_path }}
  
    deploy:
@@ -801,6 +823,7 @@ index 0a47bc994e202f089f748e6a7dbbc535c4ee3363..bd5e2ed8682aae31f2677bb5f786e9dc
 -    uses: ./.github/workflows/deploy.yml
 +    uses: ./.github/workflows/release.yml
      with:
++      verify_public_trust: ${{ inputs.verify_public_trust || false }}
        framework: ${{ needs.backend.outputs.framework }}
        branch: ${{ github.ref_name }}
        major_version: ${{ needs.backend.outputs.major_version }}
@@ -1124,10 +1147,10 @@ index 0000000000000000000000000000000000000000..5a6a79f3ef1f0a188641317ad265280f
 +          fi
 diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
 new file mode 100644
-index 0000000000000000000000000000000000000000..fcd82d1aef4a9808271f0b9f9558701ecf2cb63f
+index 0000000000000000000000000000000000000000..be110f502841a37b5aaba981875472b9815eb520
 --- /dev/null
 +++ b/.github/workflows/release.yml
-@@ -0,0 +1,286 @@
+@@ -0,0 +1,322 @@
 +name: Release
 +
 +on:
@@ -1149,6 +1172,11 @@ index 0000000000000000000000000000000000000000..fcd82d1aef4a9808271f0b9f9558701e
 +        description: "Sonarr app version"
 +        required: true
 +        type: string
++      verify_public_trust:
++        description: "Qualify actual release clients against the incident endpoints"
++        required: false
++        default: false
++        type: boolean
 +    secrets:
 +      GHCR_TOKEN:
 +        required: false
@@ -1301,12 +1329,26 @@ index 0000000000000000000000000000000000000000..fcd82d1aef4a9808271f0b9f9558701e
 +        run: |
 +          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 +
++      - name: Set up trust probe compiler
++        if: ${{ inputs.verify_public_trust }}
++        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
++        with:
++          dotnet-version: 6.0.428
++
++      - name: Compile application HTTPS trust probe
++        if: ${{ inputs.verify_public_trust }}
++        shell: bash
++        run: |
++          dotnet publish scripts/security/TrustProbe/TrustProbe.csproj -c Release \
++            -p:SonarrBinaryDirectory="$PWD/Sonarr-amd64" -o "$RUNNER_TEMP/sonarr-trust-probe"
++
 +      - name: Build and Push Docker Image
 +        uses: docker/build-push-action@v6
 +        with:
 +          context: .
 +          file: ./Dockerfile.release
 +          platforms: linux/amd64,linux/arm64
++          pull: true
 +          push: true
 +          tags: |
 +            ${{ steps.image.outputs.name }}:${{ needs.resolve_version.outputs.release_version }}
@@ -1317,6 +1359,23 @@ index 0000000000000000000000000000000000000000..fcd82d1aef4a9808271f0b9f9558701e
 +            org.opencontainers.image.source=https://github.com/${{ github.repository }}
 +            org.opencontainers.image.version=${{ needs.resolve_version.outputs.release_version }}
 +            org.opencontainers.image.revision=${{ github.sha }}
++
++      - name: Verify application HTTPS trust in both release images
++        if: ${{ inputs.verify_public_trust }}
++        shell: bash
++        env:
++          IMAGE_NAME: ${{ steps.image.outputs.name }}
++          RELEASE_VERSION: ${{ needs.resolve_version.outputs.release_version }}
++        run: |
++          set -euo pipefail
++          for arch in amd64 arm64; do
++            # Overlay only the managed entry assembly in a disposable container.
++            # The actual Sonarr apphost, self-contained runtime, dependencies,
++            # dispatcher/validation classes and image OS trust stay in use.
++            docker run --rm --platform "linux/$arch" --entrypoint /opt/sonarr/Sonarr \
++              -v "$RUNNER_TEMP/sonarr-trust-probe/TrustProbe.dll:/opt/sonarr/Sonarr.dll:ro" \
++              "$IMAGE_NAME:$RELEASE_VERSION"
++          done
 +
 +  release:
 +    needs: [resolve_version, package, docker]
@@ -2119,13 +2178,21 @@ index 9eedd495b76ebf8ef4d5a2467837d8fade205929..29b9ccee36bf795eedb541355dd2756f
 +Open an issue or start a discussion in the repository. For general Sonarr questions unrelated to this fork, use the [upstream Sonarr community](https://wiki.servarr.com/sonarr).
 diff --git a/Dockerfile b/Dockerfile
 new file mode 100644
-index 0000000000000000000000000000000000000000..84de14f8914eef7f263ae05ce2ba4fe9b15c0878
+index 0000000000000000000000000000000000000000..765a22dfd101f4482eeeb50eb9c2e58bd4ecc2d6
 --- /dev/null
 +++ b/Dockerfile
-@@ -0,0 +1,12 @@
-+FROM mcr.microsoft.com/dotnet/runtime:6.0-jammy
+@@ -0,0 +1,20 @@
++FROM mcr.microsoft.com/dotnet/runtime:6.0-jammy@sha256:16b5401a53acf33cda5136bf09ae1653f338e7f9c60dc3eee6ca9f320b0f0b14 AS trust
 +
-+RUN apt-get update && apt-get install -y libsqlite3-0 libicu70 && rm -rf /var/lib/apt/lists/*
++# apt verifies Ubuntu's signed metadata and package hashes. Refuse an old mirror.
++ARG CA_CERTIFICATES_MIN_VERSION=20260816ubuntu0.22.04.1
++RUN apt-get update \
++    && apt-get install -y --no-install-recommends ca-certificates libsqlite3-0 libicu70 \
++    && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge "$CA_CERTIFICATES_MIN_VERSION" \
++    && update-ca-certificates \
++    && rm -rf /var/lib/apt/lists/*
++
++FROM trust
 +
 +WORKDIR /opt/sonarr
 +
@@ -2137,15 +2204,25 @@ index 0000000000000000000000000000000000000000..84de14f8914eef7f263ae05ce2ba4fe9
 +ENTRYPOINT ["./Sonarr", "-nobrowser", "-data=/config"]
 diff --git a/Dockerfile.release b/Dockerfile.release
 new file mode 100644
-index 0000000000000000000000000000000000000000..9b84b6bc113a65e1de50642fc9682fb3a8cdfed1
+index 0000000000000000000000000000000000000000..1820531891fcc4e17881a3231a5b509d990cf715
 --- /dev/null
 +++ b/Dockerfile.release
-@@ -0,0 +1,14 @@
-+FROM mcr.microsoft.com/dotnet/runtime:6.0-jammy
+@@ -0,0 +1,24 @@
++FROM mcr.microsoft.com/dotnet/runtime:6.0-jammy@sha256:16b5401a53acf33cda5136bf09ae1653f338e7f9c60dc3eee6ca9f320b0f0b14 AS trust
 +
 +ARG TARGETARCH
 +
-+RUN apt-get update && apt-get install -y libsqlite3-0 libicu70 && rm -rf /var/lib/apt/lists/*
++# apt verifies Ubuntu's signed metadata and package hashes. Refuse an old mirror.
++ARG CA_CERTIFICATES_MIN_VERSION=20260816ubuntu0.22.04.1
++RUN apt-get update \
++    && apt-get install -y --no-install-recommends ca-certificates libsqlite3-0 libicu70 \
++    && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge "$CA_CERTIFICATES_MIN_VERSION" \
++    && update-ca-certificates \
++    && rm -rf /var/lib/apt/lists/*
++
++FROM trust
++
++ARG TARGETARCH
 +
 +WORKDIR /opt/sonarr
 +
@@ -2653,6 +2730,206 @@ index 0000000000000000000000000000000000000000..59ae2ac6c7662e1715c299ce8ac09faf
 +    volumes:
 +      - ./prowlarr-config:/config
 +    restart: unless-stopped
+diff --git a/package.json b/package.json
+index 600ac5df371a558e1fa4a2d5e8c75a48403afb5b..e82d7e6835262974024abca013be4a979638d433 100644
+--- a/package.json
++++ b/package.json
+@@ -148,7 +148,7 @@
+     "worker-loader": "3.0.8"
+   },
+   "volta": {
+-    "node": "20.11.1",
++    "node": "24.22.0",
+     "yarn": "1.22.19"
+   }
+ }
+diff --git a/scripts/security/README.md b/scripts/security/README.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..530f8a0997c17a189ecdf2dfc37de483e71f2c73
+--- /dev/null
++++ b/scripts/security/README.md
+@@ -0,0 +1,33 @@
++# Public certificate trust qualification
++
++Both Docker recipes require signed Ubuntu CA packages at least
++`20260816ubuntu0.22.04.1`. Rebuild with `--pull`; the pinned base digest alone
++predates the eMudhra fix. Frontend CI uses supported Node 24 with exclusive OS
++trust, since the official Node bundled-CA incident release was still pending
++when this change was prepared. These changes do not migrate the .NET framework.
++
++Use the Build workflow's `verify_public_trust: true` input for incident
++qualification. It checks the frontend client and both published image
++architectures before creating a release or updating `latest`. Ordinary builds
++keep caches and do not depend on the external incident test hosts.
++
++`TrustProbe` references the exact packaged `Sonarr.Common` and `Sonarr.Core`
++assemblies. It calls the application's `ManagedHttpDispatcher` and
++`X509CertificateValidationService`, with the normal enabled validation setting.
++The release workflow overlays only the managed entry DLL in a disposable
++container. It keeps the actual Sonarr apphost, bundled runtime, dependency
++metadata, application client assemblies and image OS certificate store. No user configuration,
++credentials, indexers, database or application service is touched.
++
++A normal public HTTPS control must return HTTP 200. All twelve incident chains
++must be rejected by the actual application's callback with an untrusted,
++partial or revoked chain. DNS failures, timeouts, expiry and wrong-host errors
++do not pass. The hosts are operated by the public incident reporter:
++https://emudhra.we-have-a-problem.com/ .
++
++If qualification fails, fix the certificate/client error or retry when the test
++service recovers; do not disable validation. To recover a deployment, retain its
++previous image digest, but do not roll back to an image that accepts these chains.
++
++The standalone Node check is `node scripts/security/verify-node-trust.mjs` under
++the same Node executable and trust environment as the build.
+diff --git a/scripts/security/TrustProbe/Program.cs b/scripts/security/TrustProbe/Program.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..2402ac65572e4bc6d9b56d4f0edf01f0331d3963
+--- /dev/null
++++ b/scripts/security/TrustProbe/Program.cs
+@@ -0,0 +1,92 @@
++using System.Net;
++using System.Net.Security;
++using System.Reflection;
++using System.Runtime.InteropServices;
++using System.Security.Cryptography.X509Certificates;
++using System.Text.Json;
++using NLog;
++using NzbDrone.Common.Cache;
++using NzbDrone.Common.Http;
++using NzbDrone.Common.Http.Dispatchers;
++using NzbDrone.Common.Http.Proxy;
++using NzbDrone.Core.Configuration;
++using NzbDrone.Core.Security;
++
++var logger = LogManager.CreateNullLogger();
++var validation = new ObservedValidation(new X509CertificateValidationService(
++    DispatchProxy.Create<IConfigService, EnabledValidation>(), logger));
++var cache = new CacheManager();
++var client = new ManagedHttpDispatcher(new NoProxy(), new ManagedWebProxyFactory(cache), validation,
++    new ProbeUserAgent(), cache, logger);
++var control = "https://www.google.com/";
++var urls = new List<string> { control };
++foreach (var kind in new[] { "dv", "ov", "ev" })
++foreach (var generation in new[] { "g3b", "g3c" })
++foreach (var crossSign in new[] { string.Empty, "-aaa" })
++{
++    urls.Add($"https://{kind}-{generation}{crossSign}-emudhra.we-have-a-problem.com/");
++}
++
++Console.WriteLine(JsonSerializer.Serialize(new { runtime = RuntimeInformation.FrameworkDescription,
++    client = typeof(ManagedHttpDispatcher).Assembly.FullName, validation = CertificateValidationType.Enabled.ToString() }));
++var passed = true;
++foreach (var url in urls)
++{
++    validation.RejectedTrustChain = false;
++    try
++    {
++        var response = await client.GetResponseAsync(new HttpRequest(url) { RequestTimeout = TimeSpan.FromSeconds(15) }, new CookieContainer());
++        var pass = url == control && response.StatusCode == HttpStatusCode.OK;
++        Console.WriteLine(JsonSerializer.Serialize(new { url, status = (int)response.StatusCode, pass }));
++        passed &= pass;
++    }
++    catch (Exception error)
++    {
++        // The real application callback must observe a trust-chain error and reject it.
++        // A timeout, DNS/connect error, expired certificate or wrong hostname cannot pass.
++        var pass = url != control && validation.RejectedTrustChain;
++        Console.WriteLine(JsonSerializer.Serialize(new { url, error = error.GetType().FullName, validation.RejectedTrustChain, pass }));
++        passed &= pass;
++    }
++}
++
++return passed ? 0 : 1;
++
++// Supply the application's normal enabled setting without touching user configuration.
++public class EnabledValidation : DispatchProxy
++{
++    protected override object Invoke(MethodInfo method, object[] args)
++    {
++        if (method.Name == "get_CertificateValidation") return CertificateValidationType.Enabled;
++        throw new InvalidOperationException($"Unexpected configuration access: {method.Name}");
++    }
++}
++
++internal sealed class NoProxy : IHttpProxySettingsProvider
++{
++    public HttpProxySettings GetProxySettings(HttpUri uri) => null;
++    public HttpProxySettings GetProxySettings() => null;
++}
++
++internal sealed class ProbeUserAgent : IUserAgentBuilder
++{
++    public string GetUserAgent(bool simplified = false) => "Sonarr-Public-Trust-Probe";
++}
++
++internal sealed class ObservedValidation : ICertificateValidationService
++{
++    private readonly ICertificateValidationService _applicationValidation;
++    public bool RejectedTrustChain { get; set; }
++    public ObservedValidation(ICertificateValidationService applicationValidation) => _applicationValidation = applicationValidation;
++    public bool ShouldByPassValidationError(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors errors)
++    {
++        var accepted = _applicationValidation.ShouldByPassValidationError(sender, certificate, chain, errors);
++        if (!accepted && errors.HasFlag(SslPolicyErrors.RemoteCertificateChainErrors))
++        {
++            RejectedTrustChain |= chain.ChainStatus.Any(status => status.Status == X509ChainStatusFlags.PartialChain ||
++                status.Status == X509ChainStatusFlags.UntrustedRoot || status.Status == X509ChainStatusFlags.Revoked);
++        }
++
++        return accepted;
++    }
++}
+diff --git a/scripts/security/TrustProbe/TrustProbe.csproj b/scripts/security/TrustProbe/TrustProbe.csproj
+new file mode 100644
+index 0000000000000000000000000000000000000000..510ca08ef7a19cd651a9d37510994318182a6bcd
+--- /dev/null
++++ b/scripts/security/TrustProbe/TrustProbe.csproj
+@@ -0,0 +1,14 @@
++<Project Sdk="Microsoft.NET.Sdk">
++  <PropertyGroup>
++    <OutputType>Exe</OutputType>
++    <TargetFramework>net6.0</TargetFramework>
++    <ImplicitUsings>enable</ImplicitUsings>
++    <SonarrBinaryDirectory Condition="'$(SonarrBinaryDirectory)' == ''">../../../Sonarr-amd64</SonarrBinaryDirectory>
++  </PropertyGroup>
++  <ItemGroup>
++    <Reference Include="Sonarr.Common"><HintPath>$(SonarrBinaryDirectory)/Sonarr.Common.dll</HintPath></Reference>
++    <Reference Include="Sonarr.Core"><HintPath>$(SonarrBinaryDirectory)/Sonarr.Core.dll</HintPath></Reference>
++    <Reference Include="NLog"><HintPath>$(SonarrBinaryDirectory)/NLog.dll</HintPath></Reference>
++    <Reference Include="IPAddressRange"><HintPath>$(SonarrBinaryDirectory)/IPAddressRange.dll</HintPath></Reference>
++  </ItemGroup>
++</Project>
+diff --git a/scripts/security/verify-node-trust.mjs b/scripts/security/verify-node-trust.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..d43ea1391d33dcc9de26ecc3b26c344271f9063e
+--- /dev/null
++++ b/scripts/security/verify-node-trust.mjs
+@@ -0,0 +1,24 @@
++// Run with the same Node executable and trust settings as the application.
++// A network/DNS failure is never accepted as proof of certificate distrust.
++import https from 'node:https';
++
++const control = 'https://www.google.com/';
++const incident = ['dv', 'ov', 'ev'].flatMap(kind => ['g3b', 'g3c'].flatMap(generation =>
++  ['', '-aaa'].map(cross => `https://${kind}-${generation}${cross}-emudhra.we-have-a-problem.com/`)));
++const rejected = new Set(['UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'CERT_REVOKED', 'SELF_SIGNED_CERT_IN_CHAIN']);
++console.log(JSON.stringify({ node: process.version, options: process.env.NODE_OPTIONS, caFile: process.env.SSL_CERT_FILE }));
++let passed = true;
++for (const url of [control, ...incident]) {
++  const result = await new Promise(resolve => {
++    const request = https.get(url, { timeout: 15000 }, response => {
++      response.resume();
++      resolve({ url, status: response.statusCode, authorized: response.socket.authorized });
++    });
++    request.on('timeout', () => request.destroy(new Error('request timeout')));
++    request.on('error', error => resolve({ url, error: error.code || error.message }));
++  });
++  result.pass = url === control ? result.status === 200 && result.authorized === true : rejected.has(result.error);
++  console.log(JSON.stringify(result));
++  passed &&= result.pass;
++}
++if (!passed) process.exitCode = 1;
 diff --git a/src/Directory.Build.props b/src/Directory.Build.props
 index 239a98d737d9a9935b20db9f72bb99b26b6f10d7..90d0d970beb271fd8aa27955112b0debe2c4ed8b 100644
 --- a/src/Directory.Build.props
