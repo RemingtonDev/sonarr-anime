@@ -2730,6 +2730,206 @@ index 0000000000000000000000000000000000000000..59ae2ac6c7662e1715c299ce8ac09faf
 +    volumes:
 +      - ./prowlarr-config:/config
 +    restart: unless-stopped
+diff --git a/package.json b/package.json
+index 600ac5df371a558e1fa4a2d5e8c75a48403afb5b..e82d7e6835262974024abca013be4a979638d433 100644
+--- a/package.json
++++ b/package.json
+@@ -148,7 +148,7 @@
+     "worker-loader": "3.0.8"
+   },
+   "volta": {
+-    "node": "20.11.1",
++    "node": "24.22.0",
+     "yarn": "1.22.19"
+   }
+ }
+diff --git a/scripts/security/README.md b/scripts/security/README.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..530f8a0997c17a189ecdf2dfc37de483e71f2c73
+--- /dev/null
++++ b/scripts/security/README.md
+@@ -0,0 +1,33 @@
++# Public certificate trust qualification
++
++Both Docker recipes require signed Ubuntu CA packages at least
++`20260816ubuntu0.22.04.1`. Rebuild with `--pull`; the pinned base digest alone
++predates the eMudhra fix. Frontend CI uses supported Node 24 with exclusive OS
++trust, since the official Node bundled-CA incident release was still pending
++when this change was prepared. These changes do not migrate the .NET framework.
++
++Use the Build workflow's `verify_public_trust: true` input for incident
++qualification. It checks the frontend client and both published image
++architectures before creating a release or updating `latest`. Ordinary builds
++keep caches and do not depend on the external incident test hosts.
++
++`TrustProbe` references the exact packaged `Sonarr.Common` and `Sonarr.Core`
++assemblies. It calls the application's `ManagedHttpDispatcher` and
++`X509CertificateValidationService`, with the normal enabled validation setting.
++The release workflow overlays only the managed entry DLL in a disposable
++container. It keeps the actual Sonarr apphost, bundled runtime, dependency
++metadata, application client assemblies and image OS certificate store. No user configuration,
++credentials, indexers, database or application service is touched.
++
++A normal public HTTPS control must return HTTP 200. All twelve incident chains
++must be rejected by the actual application's callback with an untrusted,
++partial or revoked chain. DNS failures, timeouts, expiry and wrong-host errors
++do not pass. The hosts are operated by the public incident reporter:
++https://emudhra.we-have-a-problem.com/ .
++
++If qualification fails, fix the certificate/client error or retry when the test
++service recovers; do not disable validation. To recover a deployment, retain its
++previous image digest, but do not roll back to an image that accepts these chains.
++
++The standalone Node check is `node scripts/security/verify-node-trust.mjs` under
++the same Node executable and trust environment as the build.
+diff --git a/scripts/security/TrustProbe/Program.cs b/scripts/security/TrustProbe/Program.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..2402ac65572e4bc6d9b56d4f0edf01f0331d3963
+--- /dev/null
++++ b/scripts/security/TrustProbe/Program.cs
+@@ -0,0 +1,92 @@
++using System.Net;
++using System.Net.Security;
++using System.Reflection;
++using System.Runtime.InteropServices;
++using System.Security.Cryptography.X509Certificates;
++using System.Text.Json;
++using NLog;
++using NzbDrone.Common.Cache;
++using NzbDrone.Common.Http;
++using NzbDrone.Common.Http.Dispatchers;
++using NzbDrone.Common.Http.Proxy;
++using NzbDrone.Core.Configuration;
++using NzbDrone.Core.Security;
++
++var logger = LogManager.CreateNullLogger();
++var validation = new ObservedValidation(new X509CertificateValidationService(
++    DispatchProxy.Create<IConfigService, EnabledValidation>(), logger));
++var cache = new CacheManager();
++var client = new ManagedHttpDispatcher(new NoProxy(), new ManagedWebProxyFactory(cache), validation,
++    new ProbeUserAgent(), cache, logger);
++var control = "https://www.google.com/";
++var urls = new List<string> { control };
++foreach (var kind in new[] { "dv", "ov", "ev" })
++foreach (var generation in new[] { "g3b", "g3c" })
++foreach (var crossSign in new[] { string.Empty, "-aaa" })
++{
++    urls.Add($"https://{kind}-{generation}{crossSign}-emudhra.we-have-a-problem.com/");
++}
++
++Console.WriteLine(JsonSerializer.Serialize(new { runtime = RuntimeInformation.FrameworkDescription,
++    client = typeof(ManagedHttpDispatcher).Assembly.FullName, validation = CertificateValidationType.Enabled.ToString() }));
++var passed = true;
++foreach (var url in urls)
++{
++    validation.RejectedTrustChain = false;
++    try
++    {
++        var response = await client.GetResponseAsync(new HttpRequest(url) { RequestTimeout = TimeSpan.FromSeconds(15) }, new CookieContainer());
++        var pass = url == control && response.StatusCode == HttpStatusCode.OK;
++        Console.WriteLine(JsonSerializer.Serialize(new { url, status = (int)response.StatusCode, pass }));
++        passed &= pass;
++    }
++    catch (Exception error)
++    {
++        // The real application callback must observe a trust-chain error and reject it.
++        // A timeout, DNS/connect error, expired certificate or wrong hostname cannot pass.
++        var pass = url != control && validation.RejectedTrustChain;
++        Console.WriteLine(JsonSerializer.Serialize(new { url, error = error.GetType().FullName, validation.RejectedTrustChain, pass }));
++        passed &= pass;
++    }
++}
++
++return passed ? 0 : 1;
++
++// Supply the application's normal enabled setting without touching user configuration.
++public class EnabledValidation : DispatchProxy
++{
++    protected override object Invoke(MethodInfo method, object[] args)
++    {
++        if (method.Name == "get_CertificateValidation") return CertificateValidationType.Enabled;
++        throw new InvalidOperationException($"Unexpected configuration access: {method.Name}");
++    }
++}
++
++internal sealed class NoProxy : IHttpProxySettingsProvider
++{
++    public HttpProxySettings GetProxySettings(HttpUri uri) => null;
++    public HttpProxySettings GetProxySettings() => null;
++}
++
++internal sealed class ProbeUserAgent : IUserAgentBuilder
++{
++    public string GetUserAgent(bool simplified = false) => "Sonarr-Public-Trust-Probe";
++}
++
++internal sealed class ObservedValidation : ICertificateValidationService
++{
++    private readonly ICertificateValidationService _applicationValidation;
++    public bool RejectedTrustChain { get; set; }
++    public ObservedValidation(ICertificateValidationService applicationValidation) => _applicationValidation = applicationValidation;
++    public bool ShouldByPassValidationError(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors errors)
++    {
++        var accepted = _applicationValidation.ShouldByPassValidationError(sender, certificate, chain, errors);
++        if (!accepted && errors.HasFlag(SslPolicyErrors.RemoteCertificateChainErrors))
++        {
++            RejectedTrustChain |= chain.ChainStatus.Any(status => status.Status == X509ChainStatusFlags.PartialChain ||
++                status.Status == X509ChainStatusFlags.UntrustedRoot || status.Status == X509ChainStatusFlags.Revoked);
++        }
++
++        return accepted;
++    }
++}
+diff --git a/scripts/security/TrustProbe/TrustProbe.csproj b/scripts/security/TrustProbe/TrustProbe.csproj
+new file mode 100644
+index 0000000000000000000000000000000000000000..510ca08ef7a19cd651a9d37510994318182a6bcd
+--- /dev/null
++++ b/scripts/security/TrustProbe/TrustProbe.csproj
+@@ -0,0 +1,14 @@
++<Project Sdk="Microsoft.NET.Sdk">
++  <PropertyGroup>
++    <OutputType>Exe</OutputType>
++    <TargetFramework>net6.0</TargetFramework>
++    <ImplicitUsings>enable</ImplicitUsings>
++    <SonarrBinaryDirectory Condition="'$(SonarrBinaryDirectory)' == ''">../../../Sonarr-amd64</SonarrBinaryDirectory>
++  </PropertyGroup>
++  <ItemGroup>
++    <Reference Include="Sonarr.Common"><HintPath>$(SonarrBinaryDirectory)/Sonarr.Common.dll</HintPath></Reference>
++    <Reference Include="Sonarr.Core"><HintPath>$(SonarrBinaryDirectory)/Sonarr.Core.dll</HintPath></Reference>
++    <Reference Include="NLog"><HintPath>$(SonarrBinaryDirectory)/NLog.dll</HintPath></Reference>
++    <Reference Include="IPAddressRange"><HintPath>$(SonarrBinaryDirectory)/IPAddressRange.dll</HintPath></Reference>
++  </ItemGroup>
++</Project>
+diff --git a/scripts/security/verify-node-trust.mjs b/scripts/security/verify-node-trust.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..d43ea1391d33dcc9de26ecc3b26c344271f9063e
+--- /dev/null
++++ b/scripts/security/verify-node-trust.mjs
+@@ -0,0 +1,24 @@
++// Run with the same Node executable and trust settings as the application.
++// A network/DNS failure is never accepted as proof of certificate distrust.
++import https from 'node:https';
++
++const control = 'https://www.google.com/';
++const incident = ['dv', 'ov', 'ev'].flatMap(kind => ['g3b', 'g3c'].flatMap(generation =>
++  ['', '-aaa'].map(cross => `https://${kind}-${generation}${cross}-emudhra.we-have-a-problem.com/`)));
++const rejected = new Set(['UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'CERT_REVOKED', 'SELF_SIGNED_CERT_IN_CHAIN']);
++console.log(JSON.stringify({ node: process.version, options: process.env.NODE_OPTIONS, caFile: process.env.SSL_CERT_FILE }));
++let passed = true;
++for (const url of [control, ...incident]) {
++  const result = await new Promise(resolve => {
++    const request = https.get(url, { timeout: 15000 }, response => {
++      response.resume();
++      resolve({ url, status: response.statusCode, authorized: response.socket.authorized });
++    });
++    request.on('timeout', () => request.destroy(new Error('request timeout')));
++    request.on('error', error => resolve({ url, error: error.code || error.message }));
++  });
++  result.pass = url === control ? result.status === 200 && result.authorized === true : rejected.has(result.error);
++  console.log(JSON.stringify(result));
++  passed &&= result.pass;
++}
++if (!passed) process.exitCode = 1;
 diff --git a/src/Directory.Build.props b/src/Directory.Build.props
 index 239a98d737d9a9935b20db9f72bb99b26b6f10d7..90d0d970beb271fd8aa27955112b0debe2c4ed8b 100644
 --- a/src/Directory.Build.props
