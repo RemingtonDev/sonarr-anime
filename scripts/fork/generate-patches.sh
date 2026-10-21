@@ -65,6 +65,8 @@ write_patch 0001-release-and-branding.patch \
   frontend/src/System/Status/About/About.tsx \
   frontend/src/typings/SystemStatus.ts \
   global.json \
+  package.json \
+  scripts/security \
   local-test/docker-compose.yml \
   src/Directory.Build.props \
   src/Sonarr.Api.V3/System/SystemController.cs \
