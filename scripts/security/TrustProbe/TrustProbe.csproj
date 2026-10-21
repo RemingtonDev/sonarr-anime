@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net6.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <SonarrBinaryDirectory Condition="'$(SonarrBinaryDirectory)' == ''">../../../Sonarr-amd64</SonarrBinaryDirectory>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Sonarr.Common"><HintPath>$(SonarrBinaryDirectory)/Sonarr.Common.dll</HintPath></Reference>
+    <Reference Include="Sonarr.Core"><HintPath>$(SonarrBinaryDirectory)/Sonarr.Core.dll</HintPath></Reference>
+    <Reference Include="NLog"><HintPath>$(SonarrBinaryDirectory)/NLog.dll</HintPath></Reference>
+    <Reference Include="IPAddressRange"><HintPath>$(SonarrBinaryDirectory)/IPAddressRange.dll</HintPath></Reference>
+  </ItemGroup>
+</Project>

@@ -15,6 +15,12 @@ on:
       - "src/NzbDrone.Core/Localization/Core/**"
       - "src/Sonarr.Api.*/openapi.json"
   workflow_dispatch:
+    inputs:
+      verify_public_trust:
+        description: "Qualify release images against incident test endpoints"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -123,6 +129,9 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
+    env:
+      NODE_OPTIONS: --use-openssl-ca
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
     steps:
       - name: Check out
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -130,8 +139,21 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
+      - name: Refresh frontend HTTPS trust
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --only-upgrade ca-certificates
+          . /etc/os-release
+          dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge "20260816ubuntu0.${VERSION_ID}.1"
+
       - name: Volta
         uses: volta-cli/action@5c175f92dea6f48441c436471e6479dbc192e194 # v4
+
+      - name: Verify frontend Node HTTPS trust
+        if: ${{ inputs.verify_public_trust }}
+        run: node scripts/security/verify-node-trust.mjs
 
       - name: Yarn Install
         run: yarn install
@@ -253,6 +275,7 @@ jobs:
     secrets: inherit
     uses: ./.github/workflows/release.yml
     with:
+      verify_public_trust: ${{ inputs.verify_public_trust || false }}
       framework: ${{ needs.backend.outputs.framework }}
       branch: ${{ github.ref_name }}
       major_version: ${{ needs.backend.outputs.major_version }}
